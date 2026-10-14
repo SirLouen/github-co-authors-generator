@@ -13,6 +13,8 @@ server.
 
 ## Install
 
+Requires Chrome 140 or newer, or another Chromium browser of the same version.
+
 1. Clone or download this repository.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and select the [`extension/`](extension) folder.
@@ -76,7 +78,9 @@ Choose the groups on the settings page:
 
 Some rules always apply:
 
-- Bots (Dependabot, GitHub Actions, Copilot, …) and deleted accounts are skipped.
+- Bots (Dependabot, GitHub Actions, Copilot, …) and deleted accounts are skipped. So are commits made by
+  automation, such as a workflow committing as `GitHub Action <action@github.com>`, even though GitHub links
+  those emails to accounts that look like users. Unsubmitted (pending) reviews don't count.
 - People already listed as co-authors in the description are not added again. This includes the trailers
   GitHub pre-fills when you squash and merge. The email in *"This commit will be authored by …"* is never
   added either.
@@ -87,8 +91,10 @@ Some rules always apply:
   always attributes to their account without exposing a private email.
 
 Each click makes about five REST requests: the pull request, its commits, reviews, review comments and
-conversation comments. Lists of more than 100 items need extra requests. Signed in, it also makes one
-GraphQL request for profile names.
+conversation comments. Lists of more than 100 items need extra requests. GitHub lists at most 250 commits
+for a pull request, so longer ones are read through the compare API. If that fails, the status line says
+how many commits were checked. Signed in, it also makes one GraphQL request for profile names. GraphQL has
+its own budget, so the "API requests left" figure is the REST one.
 
 ## Privacy and permissions
 

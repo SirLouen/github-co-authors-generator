@@ -81,6 +81,60 @@ describe('collectParticipants', () => {
 		assert.deepEqual(participants, []);
 	});
 
+	it('skips automation commits even when GitHub links their email to an account', () => {
+		// Real links on github.com: action@ and actions@github.com belong to "actions-user",
+		// github-actions@github.com to "invalid-email-address". Neither is typed "Bot".
+		const actionsUser = user('actions-user', 65916846);
+		const participants = collectParticipants(
+			{
+				pull: { user: alice },
+				commits: [
+					commit(actionsUser, 'GitHub Action', 'action@github.com', 'Auto-fix: Format code'),
+					commit(actionsUser, 'GitHub Actions Bot', 'actions@github.com'),
+					commit(user('invalid-email-address', 148100), 'github-actions', 'github-actions@github.com'),
+					commit(null, 'renovate[bot]', 'bot@renovateapp.com'),
+					commit(
+						bob,
+						'Bob B.',
+						'bob@example.com',
+						'Apply suggestion\n\nCo-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>',
+					),
+				],
+				issueComments: [{ user: actionsUser }],
+			},
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['bob'],
+		);
+	});
+
+	it('keeps people named in the trailers of automation commits', () => {
+		const participants = collectParticipants(
+			{
+				pull: { user: alice },
+				commits: [commit(null, 'GitHub Action', 'action@github.com', 'Fix\n\nCo-authored-by: Erin <erin@example.org>')],
+			},
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.email),
+			['erin@example.org'],
+		);
+	});
+
+	it('ignores unsubmitted (pending) reviews', () => {
+		const participants = collectParticipants(
+			{ pull: { user: alice }, reviews: [{ user: bob, state: 'PENDING' }, { user: carol, state: 'COMMENTED' }] },
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['carol'],
+		);
+	});
+
 	it('includes the PR author when asked to', () => {
 		const participants = collectParticipants({ pull: { user: alice } }, { ...ALL_SOURCES, includePrAuthor: true });
 		assert.deepEqual(

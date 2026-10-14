@@ -39,17 +39,21 @@ const handlers = {
 		}
 		const [auth, settings] = await Promise.all([getAuth(), getSettings()]);
 		const client = createGitHubClient({ token: auth?.token });
-		const pullPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}`;
-		const issuePath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}`;
+		const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+		const pullPath = `${repoPath}/pulls/${number}`;
 		const none = Promise.resolve([]);
 
-		const [pull, commits, reviews, reviewComments, issueComments] = await Promise.all([
+		const [pull, firstCommits, reviews, reviewComments, issueComments] = await Promise.all([
 			client.request(pullPath),
 			settings.includeCommitAuthors ? client.paginate(`${pullPath}/commits`) : none,
 			settings.includeReviewers ? client.paginate(`${pullPath}/reviews`) : none,
 			settings.includeReviewers ? client.paginate(`${pullPath}/comments`) : none,
-			settings.includeCommenters ? client.paginate(`${issuePath}/comments`) : none,
+			settings.includeCommenters ? client.paginate(`${repoPath}/issues/${number}/comments`) : none,
 		]);
+		const commits =
+			settings.includeCommitAuthors && pull.commits > firstCommits.length
+				? await fetchAllCommits(client, repoPath, pull, firstCommits)
+				: firstCommits;
 
 		let participants = collectParticipants({ pull, commits, reviews, reviewComments, issueComments }, settings);
 		// Profile names cost one GraphQL request, which needs a token.
@@ -60,6 +64,8 @@ const handlers = {
 		return {
 			ok: true,
 			participants,
+			// Lets the page warn when some commits could not be read.
+			commitCount: settings.includeCommitAuthors ? { checked: commits.length, total: pull.commits } : null,
 			authenticated: client.authenticated,
 			rateLimit: client.rateLimit,
 		};
@@ -75,6 +81,21 @@ const handlers = {
 		return { ok: true };
 	},
 };
+
+/**
+ * The pull request commits endpoint stops at 250 commits. The compare endpoint lists them all, so
+ * it is used for longer pull requests. If it fails, the first 250 are still used.
+ */
+async function fetchAllCommits(client, repoPath, pull, firstCommits) {
+	try {
+		const comparePath = `${repoPath}/compare/${pull.base.sha}...${pull.head.sha}`;
+		const commits = await client.paginate(comparePath, (page) => page.commits);
+		return commits.length > firstCommits.length ? commits : firstCommits;
+	} catch (error) {
+		console.warn('Could not list every commit of the pull request:', error);
+		return firstCommits;
+	}
+}
 
 /** Looks up GitHub profile names; failures are ignored because logins work as names too. */
 async function fetchDisplayNames(client, participants) {

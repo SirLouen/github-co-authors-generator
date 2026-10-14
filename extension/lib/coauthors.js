@@ -4,7 +4,11 @@ const NOREPLY_PATTERN = /^(?:\d+\+)?([^@\s]+)@users\.noreply\.github\.com$/i;
 const CO_AUTHOR_PATTERN = /^co-authored-by:[ \t]*(.*?)[ \t]*<([^<>\s]+)>[ \t]*$/gim;
 // Trailer tokens are hyphenated words such as Co-authored-by, Signed-off-by or Change-Id.
 const TRAILER_LINE_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+:[ \t]+\S/;
-const DELETED_USER_LOGIN = 'ghost';
+// Accounts that are not people but are not typed "Bot" either: deleted users, the accounts that
+// GitHub links automation emails (github-actions@github.com, action@github.com) to, and Copilot.
+const NON_HUMAN_LOGINS = new Set(['ghost', 'actions-user', 'invalid-email-address', 'web-flow', 'copilot']);
+// Git identities used by GitHub Actions workflows and GitHub's own web commits.
+const AUTOMATION_EMAIL_PATTERN = /^(?:noreply|actions?|github-actions)@github\.com$/i;
 
 /**
  * @typedef {object} Participant
@@ -29,13 +33,16 @@ export function loginFromNoreplyEmail(email) {
 /** @param {{ login?: string, type?: string } | null | undefined} user */
 export function isHumanUser(user) {
 	if (!user?.login) return false;
-	if (user.login.toLowerCase() === DELETED_USER_LOGIN) return false;
-	if (user.login.endsWith('[bot]')) return false;
+	const login = user.login.toLowerCase();
+	if (NON_HUMAN_LOGINS.has(login) || login.endsWith('[bot]')) return false;
 	return !user.type || user.type === 'User';
 }
 
-function isBotEmail(email) {
-	return /\[bot\]@/i.test(email) || /^(?:noreply|actions)@github\.com$/i.test(email);
+/** Whether a git name and email belong to a bot or to automation rather than a person. */
+function isBotIdentity({ name = '', email = '' }) {
+	if (/\[bot\]$/i.test(name.trim()) || /\[bot\]@/i.test(email) || AUTOMATION_EMAIL_PATTERN.test(email)) return true;
+	const noreplyLogin = loginFromNoreplyEmail(email);
+	return noreplyLogin !== null && !isHumanUser({ login: noreplyLogin });
 }
 
 /** Parses the `Co-authored-by: Name <email>` trailers found in a commit message. */
@@ -70,7 +77,7 @@ export function collectParticipants(
 	const keyByEmail = new Map();
 
 	const addEmail = (person, key, email) => {
-		if (!email || isBotEmail(email)) return;
+		if (!email || isBotIdentity({ email })) return;
 		const normalized = email.toLowerCase();
 		if (!person.emails.some((known) => known.toLowerCase() === normalized)) person.emails.push(email);
 		keyByEmail.set(normalized, key);
@@ -114,7 +121,7 @@ export function collectParticipants(
 
 	/** Adds someone known only by a git name and email (no linked GitHub account). */
 	const addGitIdentity = ({ name, email }, source) => {
-		if (!email || isBotEmail(email)) return;
+		if (!email || isBotIdentity({ name, email })) return;
 		const noreplyLogin = loginFromNoreplyEmail(email);
 		const key =
 			keyByEmail.get(email.toLowerCase()) ??
@@ -134,7 +141,10 @@ export function collectParticipants(
 	if (options.includeCommitAuthors) {
 		for (const commit of commits) {
 			const gitAuthor = commit.commit?.author;
-			if (commit.author) {
+			// Automation commits (e.g. a workflow that formats code) credit nobody, even when GitHub
+			// links their email to an account. Their trailers may still name people.
+			const automated = Boolean(gitAuthor) && isBotIdentity(gitAuthor);
+			if (commit.author && !automated) {
 				addUser(commit.author, 'commit', gitAuthor);
 			} else if (gitAuthor) {
 				addGitIdentity(gitAuthor, 'commit');
@@ -146,15 +156,17 @@ export function collectParticipants(
 	}
 
 	if (options.includeReviewers) {
-		for (const { user } of [...reviews, ...reviewComments]) addUser(user, 'review');
+		// The API also returns the viewer's own unsubmitted (PENDING) review.
+		const submittedReviews = reviews.filter((review) => review.state !== 'PENDING');
+		for (const { user } of [...submittedReviews, ...reviewComments]) addUser(user, 'review');
 	}
 
 	if (options.includeCommenters) {
 		for (const { user } of issueComments) addUser(user, 'comment');
 	}
 
-	// A squash merge is authored by the PR author. The merge box names the actual author too, and
-	// addCoAuthorsToMessage() leaves that email out, which covers merge commits authored by the merger.
+	// A squash merge is authored by the PR author. The merge box also names the commit author, and
+	// addCoAuthorsToMessage() leaves that email out.
 	const prAuthorLogin = options.includePrAuthor ? null : pull?.user?.login?.toLowerCase();
 
 	const participants = [];

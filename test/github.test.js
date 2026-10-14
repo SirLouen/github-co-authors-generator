@@ -53,6 +53,41 @@ describe('createGitHubClient', () => {
 		assert.equal(calls[0].url, 'https://api.github.com/repos/o/r/issues/1/comments?per_page=100');
 	});
 
+	it('reports the REST rate limit, not the separate GraphQL budget', async () => {
+		const { fetchImpl } = fakeFetch([
+			['/graphql', { body: { data: {} }, headers: { 'x-ratelimit-resource': 'graphql', 'x-ratelimit-remaining': '0' } }],
+			['/newer', { body: {}, headers: { 'x-ratelimit-resource': 'core', 'x-ratelimit-remaining': '4980' } }],
+			['/older', { body: {}, headers: { 'x-ratelimit-resource': 'core', 'x-ratelimit-remaining': '4990' } }],
+		]);
+		const client = createGitHubClient({ token: 't', fetchImpl });
+		await client.request('/newer');
+		await client.request('/older'); // A parallel response that arrived late with an older count.
+		assert.equal(client.rateLimit.remaining, 4980);
+		await client.graphql('query { x }');
+		assert.equal(client.rateLimit.remaining, 4980);
+	});
+
+	it('paginates endpoints that wrap their items in an object', async () => {
+		const { fetchImpl } = fakeFetch([
+			['page=2', { body: { commits: [{ sha: 'c' }] } }],
+			[
+				'/compare/',
+				{
+					body: { commits: [{ sha: 'a' }, { sha: 'b' }], files: [] },
+					headers: { link: '<https://api.github.com/repos/o/r/compare/x...y?per_page=100&page=2>; rel="next"' },
+				},
+			],
+		]);
+		const commits = await createGitHubClient({ token: 't', fetchImpl }).paginate(
+			'/repos/o/r/compare/x...y',
+			(page) => page.commits,
+		);
+		assert.deepEqual(
+			commits.map((c) => c.sha),
+			['a', 'b', 'c'],
+		);
+	});
+
 	it('posts GraphQL queries', async () => {
 		const { fetchImpl, calls } = fakeFetch([['/graphql', { body: { data: { u0: { login: 'a', name: 'A' } } } }]]);
 		const result = await createGitHubClient({ token: 't', fetchImpl }).graphql('query { x }', { l0: 'a' });
