@@ -33,7 +33,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 const handlers = {
 	/** Loads the participants of a pull request. */
-	async 'coauthors:fetch'({ owner, repo, number, viewerLogin }) {
+	async 'coauthors:fetch'({ owner, repo, number }) {
 		if (!isValidSegment(owner) || !isValidSegment(repo) || !Number.isInteger(number)) {
 			throw new Error('Not a pull request page.');
 		}
@@ -51,10 +51,7 @@ const handlers = {
 			settings.includeCommenters ? client.paginate(`${issuePath}/comments`) : none,
 		]);
 
-		let participants = collectParticipants(
-			{ pull, commits, reviews, reviewComments, issueComments },
-			{ ...settings, mergerLogin: viewerLogin || auth?.login || null },
-		);
+		let participants = collectParticipants({ pull, commits, reviews, reviewComments, issueComments }, settings);
 		// Profile names cost one GraphQL request, which needs a token.
 		if (settings.useDisplayNames && client.authenticated) {
 			participants = applyDisplayNames(participants, await fetchDisplayNames(client, participants));

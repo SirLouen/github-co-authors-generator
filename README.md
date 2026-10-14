@@ -80,8 +80,8 @@ Some rules always apply:
 - People already listed as co-authors in the description are not added again. This includes the trailers
   GitHub pre-fills when you squash and merge. The email in *"This commit will be authored by …"* is never
   added either.
-- When a bot opened the pull request, GitHub makes the person merging the commit author, so you are not
-  added as a co-author of your own commit.
+- Reviewers are credited even when they are the one merging, for example when you approve and squash a
+  Dependabot pull request.
 - Emails: commit authors keep the email from their commits, the same one GitHub uses in its own trailers.
   Everyone else gets their GitHub no-reply address (`ID+login@users.noreply.github.com`), which GitHub
   always attributes to their account without exposing a private email.

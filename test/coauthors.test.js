@@ -89,25 +89,30 @@ describe('collectParticipants', () => {
 		);
 	});
 
-	it('leaves out the merger on bot pull requests, since they author the merge commit', () => {
-		const activity = {
-			pull: { user: dependabot },
-			issueComments: [{ user: alice }, { user: bob }],
-		};
-		const botPr = collectParticipants(activity, { ...ALL_SOURCES, mergerLogin: 'Alice' });
+	it('credits the human reviewer of a Dependabot pull request', () => {
+		// The squash commit is authored by Dependabot, so the maintainer who approved must be credited.
+		const sirlouen = user('SirLouen', 5);
+		const participants = collectParticipants(
+			{
+				pull: { user: dependabot },
+				commits: [
+					commit(dependabot, 'dependabot[bot]', '49699333+dependabot[bot]@users.noreply.github.com'),
+				],
+				reviews: [{ user: sirlouen, state: 'APPROVED' }],
+				issueComments: [{ user: user('codecov[bot]', 22429695, 'Bot') }],
+			},
+			ALL_SOURCES,
+		);
 		assert.deepEqual(
-			botPr.map((p) => p.login),
-			['bob'],
+			participants.map(({ login, email, sources }) => ({ login, email, sources })),
+			[{ login: 'SirLouen', email: '5+SirLouen@users.noreply.github.com', sources: ['review'] }],
 		);
 
-		const humanPr = collectParticipants(
-			{ ...activity, pull: { user: carol } },
-			{ ...ALL_SOURCES, mergerLogin: 'alice' },
-		);
-		assert.deepEqual(
-			humanPr.map((p) => p.login),
-			['alice', 'bob'],
-		);
+		const { message, added } = addCoAuthorsToMessage('', participants, {
+			excludeEmails: ['49699333+dependabot[bot]@users.noreply.github.com'],
+		});
+		assert.equal(added, 1);
+		assert.equal(message, 'Co-authored-by: SirLouen <5+SirLouen@users.noreply.github.com>');
 	});
 
 	it('uses the git identity of commit authors without a GitHub account', () => {

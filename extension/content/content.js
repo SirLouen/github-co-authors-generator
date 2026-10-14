@@ -133,13 +133,7 @@
 		showStatus(status, { text: 'Loading pull request participants…', tone: 'muted' });
 
 		try {
-			const result = await sendMessage({
-				type: 'coauthors:fetch',
-				owner,
-				repo,
-				number: Number(number),
-				viewerLogin: document.querySelector('meta[name="user-login"]')?.content || null,
-			});
+			const result = await sendMessage({ type: 'coauthors:fetch', owner, repo, number: Number(number) });
 			// Read the message only now, in case it was edited while participants were loading.
 			const currentMessage = textarea.value;
 			const { message, added, skipped } = await sendMessage({

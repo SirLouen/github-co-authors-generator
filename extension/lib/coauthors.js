@@ -58,8 +58,6 @@ export function parseCoAuthorTrailers(message) {
  * @param {boolean} options.includeReviewers
  * @param {boolean} options.includeCommenters
  * @param {boolean} options.includePrAuthor
- * @param {string | null} [options.mergerLogin] Login of the person merging. GitHub makes them the
- *   author of the merge commit when a bot opened the pull request, so they are left out then.
  * @returns {Participant[]}
  */
 export function collectParticipants(
@@ -155,17 +153,14 @@ export function collectParticipants(
 		for (const { user } of issueComments) addUser(user, 'comment');
 	}
 
-	// The merge commit is authored by the PR author, or by the merger when a bot opened the PR.
-	const excludedLogins = new Set();
-	if (!options.includePrAuthor && pull?.user?.login) excludedLogins.add(pull.user.login.toLowerCase());
-	if (pull?.user && !isHumanUser(pull.user) && options.mergerLogin) {
-		excludedLogins.add(options.mergerLogin.toLowerCase());
-	}
+	// A squash merge is authored by the PR author. The merge box names the actual author too, and
+	// addCoAuthorsToMessage() leaves that email out, which covers merge commits authored by the merger.
+	const prAuthorLogin = options.includePrAuthor ? null : pull?.user?.login?.toLowerCase();
 
 	const participants = [];
 	for (const person of people.values()) {
 		const login = person.login ?? loginFromNoreplyEmail(person.emails[0] ?? '');
-		if (login && excludedLogins.has(login.toLowerCase())) continue;
+		if (login && login.toLowerCase() === prAuthorLogin) continue;
 		if (person.emails.length === 0) continue;
 		participants.push({
 			login: person.login,
