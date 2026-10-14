@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>GitHub Co-Authors Generator</title>
+		<link rel="icon" href="../icons/icon-32.png" />
+		<link rel="stylesheet" href="options.css" />
+		<script type="module" src="options.js"></script>
+	</head>
+	<body>
+		<main>
+			<header class="page-header">
+				<img src="../icons/icon-48.png" alt="" width="40" height="40" />
+				<div>
+					<h1>GitHub Co-Authors Generator</h1>
+					<p class="muted">
+						Adds an <kbd>Add co-authors</kbd> button to the merge box of GitHub pull requests.
+					</p>
+				</div>
+			</header>
+
+			<section class="card" aria-labelledby="account-heading">
+				<h2 id="account-heading">GitHub account</h2>
+				<p class="muted">
+					The extension calls the GitHub API with your own account. Signed in, you get 5,000 requests per hour.
+					Without signing in you share 60 per hour with everyone on your network.
+				</p>
+
+				<div id="signed-in" class="account" hidden>
+					<img id="avatar" class="avatar" alt="" width="40" height="40" />
+					<div class="account-details">
+						<strong>Signed in as <a id="login-link" target="_blank" rel="noreferrer"></a></strong>
+						<span id="auth-method" class="muted"></span>
+					</div>
+					<button id="sign-out" type="button" class="btn">Sign out</button>
+				</div>
+
+				<div id="signed-out">
+					<div class="method">
+						<h3>Sign in with GitHub</h3>
+						<p class="muted">Authorize the extension on github.com with a one-time code.</p>
+						<button id="device-start" type="button" class="btn btn-primary">Sign in with GitHub</button>
+						<div id="device-panel" class="device-panel" hidden>
+							<p>Enter this code on GitHub:</p>
+							<p><code id="device-code" class="user-code"></code></p>
+							<div class="row">
+								<button id="device-open" type="button" class="btn btn-primary">Copy code and open GitHub</button>
+								<button id="device-cancel" type="button" class="btn">Cancel</button>
+							</div>
+							<p id="device-status" class="muted" role="status"></p>
+						</div>
+					</div>
+
+					<div class="divider"><span>or</span></div>
+
+					<div class="method">
+						<h3>Use a personal access token</h3>
+						<p class="muted">
+							Create a
+							<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">fine-grained token</a>
+							with read-only <em>Pull requests</em> access, or a
+							<a
+								href="https://github.com/settings/tokens/new?description=GitHub%20Co-Authors%20Generator"
+								target="_blank"
+								rel="noreferrer"
+								>classic token</a
+							>
+							with no scopes (public repositories) or the <code>repo</code> scope (private repositories).
+						</p>
+						<form id="pat-form" class="row">
+							<label class="visually-hidden" for="pat-input">Personal access token</label>
+							<input
+								id="pat-input"
+								type="password"
+								autocomplete="off"
+								spellcheck="false"
+								placeholder="github_pat_… or ghp_…"
+								required
+							/>
+							<button type="submit" class="btn">Save token</button>
+						</form>
+					</div>
+				</div>
+
+				<p id="account-message" class="message" role="status"></p>
+				<p id="rate-limit" class="muted small"></p>
+			</section>
+
+			<section class="card" aria-labelledby="coauthors-heading">
+				<h2 id="coauthors-heading">Who to credit</h2>
+				<form id="settings-form" class="checks">
+					<label><input type="checkbox" name="includeCommitAuthors" /> Commit authors and their co-authors</label>
+					<label><input type="checkbox" name="includeReviewers" /> Reviewers and review commenters</label>
+					<label><input type="checkbox" name="includeCommenters" /> Conversation commenters</label>
+					<label>
+						<input type="checkbox" name="includePrAuthor" /> The pull request author
+						<span class="muted small">(usually already the author of the merge commit)</span>
+					</label>
+					<label>
+						<input type="checkbox" name="useDisplayNames" /> Use names from GitHub profiles
+						<span class="muted small">(needs sign-in)</span>
+					</label>
+				</form>
+				<p class="muted small">
+					Bots are always skipped, and people already listed as co-authors in the description are not added
+					twice.
+				</p>
+			</section>
+
+			<details id="advanced" class="card">
+				<summary>Advanced: OAuth App for “Sign in with GitHub”</summary>
+				<p class="muted">
+					Sign-in uses GitHub’s device flow, which needs the client ID of an OAuth App.
+					<a href="https://github.com/settings/applications/new" target="_blank" rel="noreferrer">Register one</a>
+					with any homepage and callback URL (for example <code>https://github.com</code>) and tick
+					<em>Enable Device Flow</em>. The client ID is not a secret.
+				</p>
+				<form id="advanced-form">
+					<label for="client-id">OAuth App client ID</label>
+					<input id="client-id" name="oauthClientId" type="text" spellcheck="false" autocomplete="off" />
+					<label class="check">
+						<input type="checkbox" name="requestPrivateRepoAccess" /> Also request access to private repositories
+						with the <code>repo</code> scope
+					</label>
+				</form>
+			</details>
+
+			<p id="saved" class="saved" role="status" aria-live="polite"></p>
+		</main>
+	</body>
+</html>
