@@ -8,6 +8,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
 	includeCommenters: true,
 	includePrAuthor: false,
 	useDisplayNames: true,
+	/** Logins never to credit, one per line. */
+	ignoredLogins: '',
 	oauthClientId: DEFAULT_OAUTH_CLIENT_ID,
 	requestPrivateRepoAccess: false,
 });

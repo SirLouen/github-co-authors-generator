@@ -61,15 +61,18 @@ export function createGitHubClient({ token = null, fetchImpl = (...args) => fetc
 
 	/**
 	 * Remembers the REST rate limit. GraphQL has its own budget, counted in points, so its headers
-	 * are ignored. Parallel responses arrive in any order, so the lowest remaining count wins.
+	 * are ignored. Parallel responses arrive in any order: the newest window wins, and within a
+	 * window the lowest remaining count.
 	 * @param {Headers} headers
 	 */
 	function trackRateLimit(headers) {
 		const limit = readRateLimit(headers);
 		if (!limit || headers.get('x-ratelimit-resource') === 'graphql') return;
-		if (!rateLimit || limit.resetAt > rateLimit.resetAt || limit.remaining < rateLimit.remaining) {
-			rateLimit = limit;
-		}
+		const replaces =
+			!rateLimit ||
+			limit.resetAt > rateLimit.resetAt ||
+			(limit.resetAt === rateLimit.resetAt && limit.remaining < rateLimit.remaining);
+		if (replaces) rateLimit = limit;
 	}
 
 	/** @param {string} pathOrUrl @param {RequestInit} [init] */

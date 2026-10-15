@@ -8,6 +8,7 @@ import {
 	collectParticipants,
 	formatCoAuthorTrailer,
 	parseCoAuthorTrailers,
+	parseLoginList,
 } from '../extension/lib/coauthors.js';
 
 const ALL_SOURCES = {
@@ -121,6 +122,41 @@ describe('collectParticipants', () => {
 		assert.deepEqual(
 			participants.map((p) => p.email),
 			['erin@example.org'],
+		);
+	});
+
+	it('skips services that act through a regular user account', () => {
+		const participants = collectParticipants(
+			{
+				pull: { user: user('imgbot[bot]', 31427850, 'Bot') },
+				commits: [commit(user('ImgBotApp', 31301654), 'ImgBotApp', 'ImgBotHelp@gmail.com')],
+				reviews: [{ user: carol, state: 'APPROVED' }],
+				issueComments: [{ user: user('codecov-commenter', 65553080) }, { user: user('CLAassistant', 22232706) }],
+			},
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['carol'],
+		);
+	});
+
+	it('never credits the logins the user chose to ignore, however they appear', () => {
+		const claude = user('claude', 81847);
+		const participants = collectParticipants(
+			{
+				pull: { user: alice },
+				commits: [
+					commit(claude, 'Claude', 'noreply@anthropic.com'),
+					commit(bob, 'Bob', 'bob@example.com', 'Fix\n\nCo-authored-by: Dave <4+dave@users.noreply.github.com>'),
+				],
+				issueComments: [{ user: carol }],
+			},
+			{ ...ALL_SOURCES, ignoredLogins: parseLoginList('@Claude\ndave, ') },
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['bob', 'carol'],
 		);
 	});
 
@@ -243,6 +279,13 @@ describe('collectParticipants', () => {
 			collectParticipants(activity, options).map((p) => p.login),
 			['dave'],
 		);
+	});
+});
+
+describe('parseLoginList', () => {
+	it('accepts lines, commas, spaces and a leading @', () => {
+		assert.deepEqual(parseLoginList(' @My-CI-User\nclaude,  renovate-bot \n\n'), ['my-ci-user', 'claude', 'renovate-bot']);
+		assert.deepEqual(parseLoginList(undefined), []);
 	});
 });
 

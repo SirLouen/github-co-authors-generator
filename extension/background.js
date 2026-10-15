@@ -1,6 +1,6 @@
 // Service worker: makes the GitHub API calls with the saved token, so the token never reaches github.com.
 
-import { addCoAuthorsToMessage, applyDisplayNames, collectParticipants } from './lib/coauthors.js';
+import { addCoAuthorsToMessage, applyDisplayNames, collectParticipants, parseLoginList } from './lib/coauthors.js';
 import { createGitHubClient, GitHubApiError } from './lib/github.js';
 import { getAuth, getSettings } from './lib/settings.js';
 
@@ -50,12 +50,15 @@ const handlers = {
 			settings.includeReviewers ? client.paginate(`${pullPath}/comments`) : none,
 			settings.includeCommenters ? client.paginate(`${repoPath}/issues/${number}/comments`) : none,
 		]);
-		const commits =
+		const { commits, incompleteReason } =
 			settings.includeCommitAuthors && pull.commits > firstCommits.length
 				? await fetchAllCommits(client, repoPath, pull, firstCommits)
-				: firstCommits;
+				: { commits: firstCommits };
 
-		let participants = collectParticipants({ pull, commits, reviews, reviewComments, issueComments }, settings);
+		let participants = collectParticipants(
+			{ pull, commits, reviews, reviewComments, issueComments },
+			{ ...settings, ignoredLogins: parseLoginList(settings.ignoredLogins) },
+		);
 		// Profile names cost one GraphQL request, which needs a token.
 		if (settings.useDisplayNames && client.authenticated) {
 			participants = applyDisplayNames(participants, await fetchDisplayNames(client, participants));
@@ -65,7 +68,9 @@ const handlers = {
 			ok: true,
 			participants,
 			// Lets the page warn when some commits could not be read.
-			commitCount: settings.includeCommitAuthors ? { checked: commits.length, total: pull.commits } : null,
+			commitCount: settings.includeCommitAuthors
+				? { checked: commits.length, total: pull.commits, incompleteReason }
+				: null,
 			authenticated: client.authenticated,
 			rateLimit: client.rateLimit,
 		};
@@ -83,17 +88,27 @@ const handlers = {
 };
 
 /**
- * The pull request commits endpoint stops at 250 commits. The compare endpoint lists them all, so
- * it is used for longer pull requests. If it fails, the first 250 are still used.
+ * The pull request commits endpoint stops at 250 commits, so longer pull requests are read through
+ * the compare endpoint instead. It compares against the base branch as it is now, like GitHub does
+ * for the PR's own commit list: `pull.base.sha` can be older and would pull in unrelated base
+ * commits after "Update branch". A result with more commits than the PR has is not trusted. On
+ * failure the first 250 are used, and `incompleteReason` tells the page why.
  */
 async function fetchAllCommits(client, repoPath, pull, firstCommits) {
+	const baseRef = pull.base.ref.split('/').map(encodeURIComponent).join('/');
 	try {
-		const comparePath = `${repoPath}/compare/${pull.base.sha}...${pull.head.sha}`;
-		const commits = await client.paginate(comparePath, (page) => page.commits);
-		return commits.length > firstCommits.length ? commits : firstCommits;
+		const commits = await client.paginate(
+			`${repoPath}/compare/${baseRef}...${pull.head.sha}`,
+			(page) => page.commits,
+		);
+		if (commits.length > firstCommits.length && commits.length <= pull.commits) return { commits };
+		console.warn(`Compare returned ${commits.length} commits for a pull request with ${pull.commits}.`);
+		return { commits: firstCommits };
 	} catch (error) {
 		console.warn('Could not list every commit of the pull request:', error);
-		return firstCommits;
+		// Fine-grained tokens need "Contents" read access for the compare endpoint.
+		const deniedAccess = error instanceof GitHubApiError && ['forbidden', 'not_found'].includes(error.code);
+		return { commits: firstCommits, incompleteReason: deniedAccess ? 'contents_access' : 'error' };
 	}
 }
 

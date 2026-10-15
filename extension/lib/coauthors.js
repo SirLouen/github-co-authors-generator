@@ -5,8 +5,24 @@ const CO_AUTHOR_PATTERN = /^co-authored-by:[ \t]*(.*?)[ \t]*<([^<>\s]+)>[ \t]*$/
 // Trailer tokens are hyphenated words such as Co-authored-by, Signed-off-by or Change-Id.
 const TRAILER_LINE_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+:[ \t]+\S/;
 // Accounts that are not people but are not typed "Bot" either: deleted users, the accounts that
-// GitHub links automation emails (github-actions@github.com, action@github.com) to, and Copilot.
-const NON_HUMAN_LOGINS = new Set(['ghost', 'actions-user', 'invalid-email-address', 'web-flow', 'copilot']);
+// GitHub links automation emails (github-actions@github.com, action@github.com) to, Copilot, and
+// well-known services that act through a personal access token.
+const NON_HUMAN_LOGINS = new Set([
+	'ghost',
+	'actions-user',
+	'invalid-email-address',
+	'web-flow',
+	'copilot',
+	'claassistant',
+	'codecov-commenter',
+	'coveralls',
+	'facebook-github-bot',
+	'imgbotapp',
+	'k8s-ci-robot',
+	'renovate-bot',
+	'semantic-release-bot',
+	'snyk-bot',
+]);
 // Git identities used by GitHub Actions workflows and GitHub's own web commits.
 const AUTOMATION_EMAIL_PATTERN = /^(?:noreply|actions?|github-actions)@github\.com$/i;
 
@@ -45,6 +61,14 @@ function isBotIdentity({ name = '', email = '' }) {
 	return noreplyLogin !== null && !isHumanUser({ login: noreplyLogin });
 }
 
+/** Splits a list of logins typed by the user (one per line or comma-separated, "@" optional). */
+export function parseLoginList(text) {
+	return String(text ?? '')
+		.split(/[\s,]+/)
+		.map((login) => login.replace(/^@/, '').toLowerCase())
+		.filter(Boolean);
+}
+
 /** Parses the `Co-authored-by: Name <email>` trailers found in a commit message. */
 export function parseCoAuthorTrailers(message) {
 	return Array.from(message.matchAll(CO_AUTHOR_PATTERN), ([, name, email]) => ({ name, email }));
@@ -65,6 +89,7 @@ export function parseCoAuthorTrailers(message) {
  * @param {boolean} options.includeReviewers
  * @param {boolean} options.includeCommenters
  * @param {boolean} options.includePrAuthor
+ * @param {string[]} [options.ignoredLogins] Accounts the user never wants credited.
  * @returns {Participant[]}
  */
 export function collectParticipants(
@@ -165,14 +190,15 @@ export function collectParticipants(
 		for (const { user } of issueComments) addUser(user, 'comment');
 	}
 
+	const excludedLogins = new Set((options.ignoredLogins ?? []).map((login) => login.toLowerCase()));
 	// A squash merge is authored by the PR author. The merge box also names the commit author, and
 	// addCoAuthorsToMessage() leaves that email out.
-	const prAuthorLogin = options.includePrAuthor ? null : pull?.user?.login?.toLowerCase();
+	if (!options.includePrAuthor && pull?.user?.login) excludedLogins.add(pull.user.login.toLowerCase());
 
 	const participants = [];
 	for (const person of people.values()) {
 		const login = person.login ?? loginFromNoreplyEmail(person.emails[0] ?? '');
-		if (login && login.toLowerCase() === prAuthorLogin) continue;
+		if (login && excludedLogins.has(login.toLowerCase())) continue;
 		if (person.emails.length === 0) continue;
 		participants.push({
 			login: person.login,

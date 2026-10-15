@@ -67,6 +67,17 @@ describe('createGitHubClient', () => {
 		assert.equal(client.rateLimit.remaining, 4980);
 	});
 
+	it('keeps the newer rate-limit window when an older response arrives late', async () => {
+		const { fetchImpl } = fakeFetch([
+			['/new-window', { body: {}, headers: { 'x-ratelimit-remaining': '4995', 'x-ratelimit-reset': '1700003600' } }],
+			['/old-window', { body: {}, headers: { 'x-ratelimit-remaining': '2', 'x-ratelimit-reset': '1700000000' } }],
+		]);
+		const client = createGitHubClient({ token: 't', fetchImpl });
+		await client.request('/new-window');
+		await client.request('/old-window');
+		assert.deepEqual(client.rateLimit, { limit: 5000, remaining: 4995, resetAt: 1_700_003_600_000 });
+	});
+
 	it('paginates endpoints that wrap their items in an object', async () => {
 		const { fetchImpl } = fakeFetch([
 			['page=2', { body: { commits: [{ sha: 'c' }] } }],

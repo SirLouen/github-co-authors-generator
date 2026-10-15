@@ -196,6 +196,9 @@
 		const incomplete = commitCount && commitCount.checked < commitCount.total;
 		if (incomplete) {
 			text += ` Only ${commitCount.checked} of ${commitCount.total} commits could be read; check the rest by hand.`;
+			if (commitCount.incompleteReason === 'contents_access') {
+				text += ' To read them all, a fine-grained token also needs read access to “Contents”.';
+			}
 		}
 		const tone = incomplete ? 'attention' : added > 0 ? 'success' : 'muted';
 
