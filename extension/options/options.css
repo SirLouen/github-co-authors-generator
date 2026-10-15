@@ -173,7 +173,8 @@ kbd {
 }
 
 input[type='text'],
-input[type='password'] {
+input[type='password'],
+textarea {
 	font: inherit;
 	color: var(--fg);
 	background: var(--bg);
@@ -194,6 +195,7 @@ input[type='password'] {
 }
 
 input:focus-visible,
+textarea:focus-visible,
 .btn:focus-visible,
 summary:focus-visible {
 	outline: 2px solid var(--link);
@@ -275,6 +277,18 @@ summary:focus-visible {
 
 label.check {
 	display: block;
+}
+
+label.stacked {
+	display: flex;
+	flex-direction: column;
+	margin-top: 8px;
+}
+
+#ignored-logins {
+	font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+	font-size: 12px;
+	resize: vertical;
 }
 
 summary {

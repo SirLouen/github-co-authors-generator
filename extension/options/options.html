@@ -59,7 +59,8 @@
 						<p class="muted">
 							Create a
 							<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">fine-grained token</a>
-							with read-only <em>Pull requests</em> access, or a
+							with read-only <em>Pull requests</em> and <em>Contents</em> access (Contents is only used for pull
+							requests with more than 250 commits), or a
 							<a
 								href="https://github.com/settings/tokens/new?description=GitHub%20Co-Authors%20Generator"
 								target="_blank"
@@ -101,10 +102,25 @@
 						<input type="checkbox" name="useDisplayNames" /> Use names from GitHub profiles
 						<span class="muted small">(needs sign-in)</span>
 					</label>
+					<label class="stacked" for="ignored-logins">
+						Never credit these accounts
+						<span class="muted small">
+							One login per line. Use it for machine accounts that GitHub doesn’t mark as bots, such as your CI
+							user, or AI agents that commit under their own account.
+						</span>
+					</label>
+					<textarea
+						id="ignored-logins"
+						name="ignoredLogins"
+						rows="3"
+						spellcheck="false"
+						autocomplete="off"
+						placeholder="my-ci-user"
+					></textarea>
 				</form>
 				<p class="muted small">
-					Bots are always skipped, and people already listed as co-authors in the description are not added
-					twice.
+					Bots and common service accounts are always skipped, and people already listed as co-authors in the
+					description are not added twice.
 				</p>
 			</section>
 

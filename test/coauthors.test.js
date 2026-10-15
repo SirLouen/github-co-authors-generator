@@ -8,6 +8,7 @@ import {
 	collectParticipants,
 	formatCoAuthorTrailer,
 	parseCoAuthorTrailers,
+	parseLoginList,
 } from '../extension/lib/coauthors.js';
 
 const ALL_SOURCES = {
@@ -81,6 +82,129 @@ describe('collectParticipants', () => {
 		assert.deepEqual(participants, []);
 	});
 
+	it('skips automation commits even when GitHub links their email to an account', () => {
+		// Real links on github.com: action@ and actions@github.com belong to "actions-user",
+		// github-actions@github.com to "invalid-email-address". Neither is typed "Bot".
+		const actionsUser = user('actions-user', 65916846);
+		const participants = collectParticipants(
+			{
+				pull: { user: alice },
+				commits: [
+					commit(actionsUser, 'GitHub Action', 'action@github.com', 'Auto-fix: Format code'),
+					commit(actionsUser, 'GitHub Actions Bot', 'actions@github.com'),
+					commit(user('invalid-email-address', 148100), 'github-actions', 'github-actions@github.com'),
+					commit(null, 'renovate[bot]', 'bot@renovateapp.com'),
+					commit(
+						bob,
+						'Bob B.',
+						'bob@example.com',
+						'Apply suggestion\n\nCo-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>',
+					),
+				],
+				issueComments: [{ user: actionsUser }],
+			},
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['bob'],
+		);
+	});
+
+	it('keeps people named in the trailers of automation commits', () => {
+		const participants = collectParticipants(
+			{
+				pull: { user: alice },
+				commits: [commit(null, 'GitHub Action', 'action@github.com', 'Fix\n\nCo-authored-by: Erin <erin@example.org>')],
+			},
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.email),
+			['erin@example.org'],
+		);
+	});
+
+	it('skips services that act through a regular user account', () => {
+		const participants = collectParticipants(
+			{
+				pull: { user: user('imgbot[bot]', 31427850, 'Bot') },
+				commits: [commit(user('ImgBotApp', 31301654), 'ImgBotApp', 'ImgBotHelp@gmail.com')],
+				reviews: [{ user: carol, state: 'APPROVED' }],
+				issueComments: [{ user: user('codecov-commenter', 65553080) }, { user: user('CLAassistant', 22232706) }],
+			},
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['carol'],
+		);
+	});
+
+	it('never credits the logins the user chose to ignore, however they appear', () => {
+		const claude = user('claude', 81847);
+		const participants = collectParticipants(
+			{
+				pull: { user: alice },
+				commits: [
+					commit(claude, 'Claude', 'noreply@anthropic.com'),
+					commit(bob, 'Bob', 'bob@example.com', 'Fix\n\nCo-authored-by: Dave <4+dave@users.noreply.github.com>'),
+				],
+				issueComments: [{ user: carol }],
+			},
+			{ ...ALL_SOURCES, ignoredLogins: parseLoginList('@Claude\ndave, ') },
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['bob', 'carol'],
+		);
+	});
+
+	it('credits Claude only for work from Claude Code cloud sessions', () => {
+		const claude = user('claude', 81847);
+		const session = 'Claude-Session: https://claude.ai/code/session_01VACPqDHYdxk7xfR4tsgSTQ';
+		const credited = (commits) =>
+			collectParticipants({ pull: { user: alice }, commits }, ALL_SOURCES).map((p) => p.email);
+
+		// Local Claude Code: you author the commit and Claude is only listed as a co-author.
+		assert.deepEqual(
+			credited([
+				commit(bob, 'Bob', 'bob@example.com', 'Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>'),
+			]),
+			['bob@example.com'],
+		);
+		// Cloud session: Claude authors the commit and links the session.
+		assert.deepEqual(
+			credited([
+				commit(
+					claude,
+					'Claude',
+					'noreply@anthropic.com',
+					`Fix\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n${session}`,
+				),
+			]),
+			['noreply@anthropic.com'],
+		);
+		// Cloud session committing under your own git identity: the session link is enough.
+		assert.deepEqual(
+			credited([
+				commit(bob, 'Bob', 'bob@example.com', `Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n${session}`),
+			]),
+			['bob@example.com', 'noreply@anthropic.com'],
+		);
+	});
+
+	it('ignores unsubmitted (pending) reviews', () => {
+		const participants = collectParticipants(
+			{ pull: { user: alice }, reviews: [{ user: bob, state: 'PENDING' }, { user: carol, state: 'COMMENTED' }] },
+			ALL_SOURCES,
+		);
+		assert.deepEqual(
+			participants.map((p) => p.login),
+			['carol'],
+		);
+	});
+
 	it('includes the PR author when asked to', () => {
 		const participants = collectParticipants({ pull: { user: alice } }, { ...ALL_SOURCES, includePrAuthor: true });
 		assert.deepEqual(
@@ -89,25 +213,30 @@ describe('collectParticipants', () => {
 		);
 	});
 
-	it('leaves out the merger on bot pull requests, since they author the merge commit', () => {
-		const activity = {
-			pull: { user: dependabot },
-			issueComments: [{ user: alice }, { user: bob }],
-		};
-		const botPr = collectParticipants(activity, { ...ALL_SOURCES, mergerLogin: 'Alice' });
+	it('credits the human reviewer of a Dependabot pull request', () => {
+		// The squash commit is authored by Dependabot, so the maintainer who approved must be credited.
+		const sirlouen = user('SirLouen', 5);
+		const participants = collectParticipants(
+			{
+				pull: { user: dependabot },
+				commits: [
+					commit(dependabot, 'dependabot[bot]', '49699333+dependabot[bot]@users.noreply.github.com'),
+				],
+				reviews: [{ user: sirlouen, state: 'APPROVED' }],
+				issueComments: [{ user: user('codecov[bot]', 22429695, 'Bot') }],
+			},
+			ALL_SOURCES,
+		);
 		assert.deepEqual(
-			botPr.map((p) => p.login),
-			['bob'],
+			participants.map(({ login, email, sources }) => ({ login, email, sources })),
+			[{ login: 'SirLouen', email: '5+SirLouen@users.noreply.github.com', sources: ['review'] }],
 		);
 
-		const humanPr = collectParticipants(
-			{ ...activity, pull: { user: carol } },
-			{ ...ALL_SOURCES, mergerLogin: 'alice' },
-		);
-		assert.deepEqual(
-			humanPr.map((p) => p.login),
-			['alice', 'bob'],
-		);
+		const { message, added } = addCoAuthorsToMessage('', participants, {
+			excludeEmails: ['49699333+dependabot[bot]@users.noreply.github.com'],
+		});
+		assert.equal(added, 1);
+		assert.equal(message, 'Co-authored-by: SirLouen <5+SirLouen@users.noreply.github.com>');
 	});
 
 	it('uses the git identity of commit authors without a GitHub account', () => {
@@ -184,6 +313,13 @@ describe('collectParticipants', () => {
 			collectParticipants(activity, options).map((p) => p.login),
 			['dave'],
 		);
+	});
+});
+
+describe('parseLoginList', () => {
+	it('accepts lines, commas, spaces and a leading @', () => {
+		assert.deepEqual(parseLoginList(' @My-CI-User\nclaude,  renovate-bot \n\n'), ['my-ci-user', 'claude', 'renovate-bot']);
+		assert.deepEqual(parseLoginList(undefined), []);
 	});
 });
 

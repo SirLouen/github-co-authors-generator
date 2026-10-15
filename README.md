@@ -13,6 +13,8 @@ server.
 
 ## Install
 
+Requires Chrome 140 or newer, or another Chromium browser of the same version.
+
 1. Clone or download this repository.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and select the [`extension/`](extension) folder.
@@ -47,7 +49,8 @@ Create a token and paste it into the settings page:
 
 - **Fine-grained token** ([create one](https://github.com/settings/personal-access-tokens/new)): choose
   *Public repositories* for public projects. For private ones, select the repositories and grant
-  **Pull requests: Read-only**.
+  **Pull requests: Read-only** and **Contents: Read-only**. Contents is only used for pull requests with more
+  than 250 commits.
 - **Classic token** ([create one](https://github.com/settings/tokens/new?description=GitHub%20Co-Authors%20Generator)):
   no scopes for public repositories, `repo` for private ones.
 
@@ -73,22 +76,33 @@ Choose the groups on the settings page:
 | Conversation commenters | on |
 | The pull request author | off: GitHub already makes them the author of a squash merge |
 | Names from GitHub profiles, instead of logins (needs sign-in) | on |
+| Never credit these accounts: logins to always leave out | empty |
 
 Some rules always apply:
 
-- Bots (Dependabot, GitHub Actions, Copilot, …) and deleted accounts are skipped.
+- Bots (Dependabot, GitHub Actions, Copilot, …) and deleted accounts are skipped. So are commits made by
+  automation, such as a workflow committing as `GitHub Action <action@github.com>`, even though GitHub links
+  those emails to accounts that look like users. Unsubmitted (pending) reviews don't count.
+- Common services that use a regular account instead of a bot account are skipped too (Codecov's
+  `codecov-commenter`, `CLAassistant`, `ImgBotApp`, `k8s-ci-robot`, …). Add your own machine accounts to
+  **Never credit these accounts**.
+- Claude (`noreply@anthropic.com`) is credited only for work from Claude Code cloud sessions: commits that
+  Claude authored, or that carry a `Claude-Session: https://claude.ai/code/session_…` line. The
+  `Co-Authored-By: Claude` line that Claude Code adds to your own commits in local sessions is skipped.
 - People already listed as co-authors in the description are not added again. This includes the trailers
   GitHub pre-fills when you squash and merge. The email in *"This commit will be authored by …"* is never
   added either.
-- When a bot opened the pull request, GitHub makes the person merging the commit author, so you are not
-  added as a co-author of your own commit.
+- Reviewers are credited even when they are the one merging, for example when you approve and squash a
+  Dependabot pull request.
 - Emails: commit authors keep the email from their commits, the same one GitHub uses in its own trailers.
   Everyone else gets their GitHub no-reply address (`ID+login@users.noreply.github.com`), which GitHub
   always attributes to their account without exposing a private email.
 
 Each click makes about five REST requests: the pull request, its commits, reviews, review comments and
-conversation comments. Lists of more than 100 items need extra requests. Signed in, it also makes one
-GraphQL request for profile names.
+conversation comments. Lists of more than 100 items need extra requests. GitHub lists at most 250 commits
+for a pull request, so longer ones are read through the compare API, against the current base branch. If
+that fails, the status line says how many commits were checked. Signed in, it also makes one GraphQL request for profile names. GraphQL has
+its own budget, so the "API requests left" figure is the REST one.
 
 ## Privacy and permissions
 

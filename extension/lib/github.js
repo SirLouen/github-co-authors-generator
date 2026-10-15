@@ -59,6 +59,22 @@ export function createGitHubClient({ token = null, fetchImpl = (...args) => fetc
 	/** @type {RateLimit | null} */
 	let rateLimit = null;
 
+	/**
+	 * Remembers the REST rate limit. GraphQL has its own budget, counted in points, so its headers
+	 * are ignored. Parallel responses arrive in any order: the newest window wins, and within a
+	 * window the lowest remaining count.
+	 * @param {Headers} headers
+	 */
+	function trackRateLimit(headers) {
+		const limit = readRateLimit(headers);
+		if (!limit || headers.get('x-ratelimit-resource') === 'graphql') return;
+		const replaces =
+			!rateLimit ||
+			limit.resetAt > rateLimit.resetAt ||
+			(limit.resetAt === rateLimit.resetAt && limit.remaining < rateLimit.remaining);
+		if (replaces) rateLimit = limit;
+	}
+
 	/** @param {string} pathOrUrl @param {RequestInit} [init] */
 	async function send(pathOrUrl, init = {}) {
 		const url = pathOrUrl.startsWith('https://') ? pathOrUrl : `${API_URL}${pathOrUrl}`;
@@ -84,7 +100,7 @@ export function createGitHubClient({ token = null, fetchImpl = (...args) => fetc
 			});
 		}
 
-		rateLimit = readRateLimit(response.headers) ?? rateLimit;
+		trackRateLimit(response.headers);
 		if (!response.ok) throw await toApiError(response, authenticated);
 		return response;
 	}
@@ -95,14 +111,19 @@ export function createGitHubClient({ token = null, fetchImpl = (...args) => fetc
 		return response.json();
 	}
 
-	/** GET every page of a list endpoint. */
-	async function paginate(path) {
+	/**
+	 * GET every page of a list endpoint.
+	 * @param {string} path
+	 * @param {(page: any) => any[]} [getItems] Picks the items out of each page, for endpoints that
+	 *   return an object rather than an array.
+	 */
+	async function paginate(path, getItems = (page) => page) {
 		const separator = path.includes('?') ? '&' : '?';
 		let url = `${path}${separator}per_page=100`;
 		const items = [];
 		for (let page = 0; url && page < MAX_PAGES; page++) {
 			const response = await send(url);
-			items.push(...(await response.json()));
+			items.push(...(getItems(await response.json()) ?? []));
 			url = nextPageUrl(response.headers.get('link'));
 		}
 		return items;

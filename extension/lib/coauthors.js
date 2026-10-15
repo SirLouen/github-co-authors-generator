@@ -4,7 +4,31 @@ const NOREPLY_PATTERN = /^(?:\d+\+)?([^@\s]+)@users\.noreply\.github\.com$/i;
 const CO_AUTHOR_PATTERN = /^co-authored-by:[ \t]*(.*?)[ \t]*<([^<>\s]+)>[ \t]*$/gim;
 // Trailer tokens are hyphenated words such as Co-authored-by, Signed-off-by or Change-Id.
 const TRAILER_LINE_PATTERN = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+:[ \t]+\S/;
-const DELETED_USER_LOGIN = 'ghost';
+// Accounts that are not people but are not typed "Bot" either: deleted users, the accounts that
+// GitHub links automation emails (github-actions@github.com, action@github.com) to, Copilot, and
+// well-known services that act through a personal access token.
+const NON_HUMAN_LOGINS = new Set([
+	'ghost',
+	'actions-user',
+	'invalid-email-address',
+	'web-flow',
+	'copilot',
+	'claassistant',
+	'codecov-commenter',
+	'coveralls',
+	'facebook-github-bot',
+	'imgbotapp',
+	'k8s-ci-robot',
+	'renovate-bot',
+	'semantic-release-bot',
+	'snyk-bot',
+]);
+// Git identities used by GitHub Actions workflows and GitHub's own web commits.
+const AUTOMATION_EMAIL_PATTERN = /^(?:noreply|actions?|github-actions)@github\.com$/i;
+// Claude is credited only for work from Claude Code cloud sessions, whose commits Claude authors and
+// marks with a session link. Locally, Claude Code only adds itself as a co-author of your commits.
+const CLAUDE_EMAIL = 'noreply@anthropic.com';
+const CLAUDE_CLOUD_SESSION_PATTERN = /^Claude-Session:[ \t]*https:\/\/claude\.ai\/code\/session_/im;
 
 /**
  * @typedef {object} Participant
@@ -29,13 +53,34 @@ export function loginFromNoreplyEmail(email) {
 /** @param {{ login?: string, type?: string } | null | undefined} user */
 export function isHumanUser(user) {
 	if (!user?.login) return false;
-	if (user.login.toLowerCase() === DELETED_USER_LOGIN) return false;
-	if (user.login.endsWith('[bot]')) return false;
+	const login = user.login.toLowerCase();
+	if (NON_HUMAN_LOGINS.has(login) || login.endsWith('[bot]')) return false;
 	return !user.type || user.type === 'User';
 }
 
-function isBotEmail(email) {
-	return /\[bot\]@/i.test(email) || /^(?:noreply|actions)@github\.com$/i.test(email);
+/** Whether a git name and email belong to a bot or to automation rather than a person. */
+function isBotIdentity({ name = '', email = '' }) {
+	if (/\[bot\]$/i.test(name.trim()) || /\[bot\]@/i.test(email) || AUTOMATION_EMAIL_PATTERN.test(email)) return true;
+	const noreplyLogin = loginFromNoreplyEmail(email);
+	return noreplyLogin !== null && !isHumanUser({ login: noreplyLogin });
+}
+
+function isClaudeIdentity({ email = '' }) {
+	return email.toLowerCase() === CLAUDE_EMAIL;
+}
+
+/** Whether a commit was made in a Claude Code cloud session. */
+function isClaudeCloudCommit(gitCommit) {
+	const authoredByClaude = Boolean(gitCommit?.author) && isClaudeIdentity(gitCommit.author);
+	return authoredByClaude || CLAUDE_CLOUD_SESSION_PATTERN.test(gitCommit?.message ?? '');
+}
+
+/** Splits a list of logins typed by the user (one per line or comma-separated, "@" optional). */
+export function parseLoginList(text) {
+	return String(text ?? '')
+		.split(/[\s,]+/)
+		.map((login) => login.replace(/^@/, '').toLowerCase())
+		.filter(Boolean);
 }
 
 /** Parses the `Co-authored-by: Name <email>` trailers found in a commit message. */
@@ -58,8 +103,7 @@ export function parseCoAuthorTrailers(message) {
  * @param {boolean} options.includeReviewers
  * @param {boolean} options.includeCommenters
  * @param {boolean} options.includePrAuthor
- * @param {string | null} [options.mergerLogin] Login of the person merging. GitHub makes them the
- *   author of the merge commit when a bot opened the pull request, so they are left out then.
+ * @param {string[]} [options.ignoredLogins] Accounts the user never wants credited.
  * @returns {Participant[]}
  */
 export function collectParticipants(
@@ -72,7 +116,7 @@ export function collectParticipants(
 	const keyByEmail = new Map();
 
 	const addEmail = (person, key, email) => {
-		if (!email || isBotEmail(email)) return;
+		if (!email || isBotIdentity({ email })) return;
 		const normalized = email.toLowerCase();
 		if (!person.emails.some((known) => known.toLowerCase() === normalized)) person.emails.push(email);
 		keyByEmail.set(normalized, key);
@@ -116,7 +160,7 @@ export function collectParticipants(
 
 	/** Adds someone known only by a git name and email (no linked GitHub account). */
 	const addGitIdentity = ({ name, email }, source) => {
-		if (!email || isBotEmail(email)) return;
+		if (!email || isBotIdentity({ name, email })) return;
 		const noreplyLogin = loginFromNoreplyEmail(email);
 		const key =
 			keyByEmail.get(email.toLowerCase()) ??
@@ -136,31 +180,36 @@ export function collectParticipants(
 	if (options.includeCommitAuthors) {
 		for (const commit of commits) {
 			const gitAuthor = commit.commit?.author;
-			if (commit.author) {
+			// Automation commits (e.g. a workflow that formats code) credit nobody, even when GitHub
+			// links their email to an account. Their trailers may still name people.
+			const automated = Boolean(gitAuthor) && isBotIdentity(gitAuthor);
+			if (commit.author && !automated) {
 				addUser(commit.author, 'commit', gitAuthor);
 			} else if (gitAuthor) {
 				addGitIdentity(gitAuthor, 'commit');
 			}
+			const fromCloudSession = isClaudeCloudCommit(commit.commit);
 			for (const coAuthor of parseCoAuthorTrailers(commit.commit?.message ?? '')) {
+				if (isClaudeIdentity(coAuthor) && !fromCloudSession) continue;
 				addGitIdentity(coAuthor, 'commit');
 			}
 		}
 	}
 
 	if (options.includeReviewers) {
-		for (const { user } of [...reviews, ...reviewComments]) addUser(user, 'review');
+		// The API also returns the viewer's own unsubmitted (PENDING) review.
+		const submittedReviews = reviews.filter((review) => review.state !== 'PENDING');
+		for (const { user } of [...submittedReviews, ...reviewComments]) addUser(user, 'review');
 	}
 
 	if (options.includeCommenters) {
 		for (const { user } of issueComments) addUser(user, 'comment');
 	}
 
-	// The merge commit is authored by the PR author, or by the merger when a bot opened the PR.
-	const excludedLogins = new Set();
+	const excludedLogins = new Set((options.ignoredLogins ?? []).map((login) => login.toLowerCase()));
+	// A squash merge is authored by the PR author. The merge box also names the commit author, and
+	// addCoAuthorsToMessage() leaves that email out.
 	if (!options.includePrAuthor && pull?.user?.login) excludedLogins.add(pull.user.login.toLowerCase());
-	if (pull?.user && !isHumanUser(pull.user) && options.mergerLogin) {
-		excludedLogins.add(options.mergerLogin.toLowerCase());
-	}
 
 	const participants = [];
 	for (const person of people.values()) {

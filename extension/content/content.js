@@ -133,13 +133,7 @@
 		showStatus(status, { text: 'Loading pull request participants…', tone: 'muted' });
 
 		try {
-			const result = await sendMessage({
-				type: 'coauthors:fetch',
-				owner,
-				repo,
-				number: Number(number),
-				viewerLogin: document.querySelector('meta[name="user-login"]')?.content || null,
-			});
+			const result = await sendMessage({ type: 'coauthors:fetch', owner, repo, number: Number(number) });
 			// Read the message only now, in case it was edited while participants were loading.
 			const currentMessage = textarea.value;
 			const { message, added, skipped } = await sendMessage({
@@ -175,7 +169,8 @@
 		const emails = [];
 		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
 		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-			if (!/authored by/i.test(node.data)) continue;
+			// Skip the description itself: React mirrors a textarea's value into its text.
+			if (!/authored by/i.test(node.data) || node.parentElement?.closest('textarea')) continue;
 			const match = node.parentElement?.textContent.match(/authored by\s+([^\s<>()]+@[^\s<>()]*[A-Za-z0-9])/i);
 			if (match) emails.push(match[1]);
 		}
@@ -191,23 +186,28 @@
 		textarea.scrollTop = textarea.scrollHeight;
 	}
 
-	function describeSuccess(added, skipped, { participants, authenticated, rateLimit }) {
+	function describeSuccess(added, skipped, { participants, commitCount, authenticated, rateLimit }) {
 		let text;
 		if (participants.length === 0) text = 'No participants to credit.';
 		else if (added === 0) text = 'Everyone is already credited.';
 		else text = `Added ${added} co-author${added === 1 ? '' : 's'}.`;
 		if (added > 0 && skipped > 0) text += ` ${skipped} already credited.`;
 
+		const incomplete = commitCount && commitCount.checked < commitCount.total;
+		if (incomplete) {
+			text += ` Only ${commitCount.checked} of ${commitCount.total} commits could be read; check the rest by hand.`;
+			if (commitCount.incompleteReason === 'contents_access') {
+				text += ' To read them all, a fine-grained token also needs read access to “Contents”.';
+			}
+		}
+		const tone = incomplete ? 'attention' : added > 0 ? 'success' : 'muted';
+
 		if (authenticated) {
 			const remaining = rateLimit ? ` ${rateLimit.remaining.toLocaleString()} API requests left.` : '';
-			return { text: text + remaining, tone: added > 0 ? 'success' : 'muted', autoHide: true };
+			return { text: text + remaining, tone, autoHide: !incomplete };
 		}
 		const remaining = rateLimit ? ` (${rateLimit.remaining} left this hour)` : '';
-		return {
-			text: `${text} Used anonymous API requests${remaining}.`,
-			tone: added > 0 ? 'success' : 'muted',
-			link: 'Sign in to raise the limit',
-		};
+		return { text: `${text} Used anonymous API requests${remaining}.`, tone, link: 'Sign in to raise the limit' };
 	}
 
 	function describeError(error) {
@@ -229,7 +229,7 @@
 
 	/**
 	 * @param {HTMLElement} status
-	 * @param {{ text: string, tone?: 'muted' | 'success' | 'danger', link?: string | null, autoHide?: boolean }} details
+	 * @param {{ text: string, tone?: 'muted' | 'success' | 'attention' | 'danger', link?: string | null, autoHide?: boolean }} details
 	 */
 	function showStatus(status, { text, tone = 'muted', link = null, autoHide = false }) {
 		clearTimeout(Number(status.dataset.hideTimer));

@@ -1,6 +1,6 @@
 // Service worker: makes the GitHub API calls with the saved token, so the token never reaches github.com.
 
-import { addCoAuthorsToMessage, applyDisplayNames, collectParticipants } from './lib/coauthors.js';
+import { addCoAuthorsToMessage, applyDisplayNames, collectParticipants, parseLoginList } from './lib/coauthors.js';
 import { createGitHubClient, GitHubApiError } from './lib/github.js';
 import { getAuth, getSettings } from './lib/settings.js';
 
@@ -33,27 +33,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 const handlers = {
 	/** Loads the participants of a pull request. */
-	async 'coauthors:fetch'({ owner, repo, number, viewerLogin }) {
+	async 'coauthors:fetch'({ owner, repo, number }) {
 		if (!isValidSegment(owner) || !isValidSegment(repo) || !Number.isInteger(number)) {
 			throw new Error('Not a pull request page.');
 		}
 		const [auth, settings] = await Promise.all([getAuth(), getSettings()]);
 		const client = createGitHubClient({ token: auth?.token });
-		const pullPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}`;
-		const issuePath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}`;
+		const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+		const pullPath = `${repoPath}/pulls/${number}`;
 		const none = Promise.resolve([]);
 
-		const [pull, commits, reviews, reviewComments, issueComments] = await Promise.all([
+		const [pull, firstCommits, reviews, reviewComments, issueComments] = await Promise.all([
 			client.request(pullPath),
 			settings.includeCommitAuthors ? client.paginate(`${pullPath}/commits`) : none,
 			settings.includeReviewers ? client.paginate(`${pullPath}/reviews`) : none,
 			settings.includeReviewers ? client.paginate(`${pullPath}/comments`) : none,
-			settings.includeCommenters ? client.paginate(`${issuePath}/comments`) : none,
+			settings.includeCommenters ? client.paginate(`${repoPath}/issues/${number}/comments`) : none,
 		]);
+		const { commits, incompleteReason } =
+			settings.includeCommitAuthors && pull.commits > firstCommits.length
+				? await fetchAllCommits(client, repoPath, pull, firstCommits)
+				: { commits: firstCommits };
 
 		let participants = collectParticipants(
 			{ pull, commits, reviews, reviewComments, issueComments },
-			{ ...settings, mergerLogin: viewerLogin || auth?.login || null },
+			{ ...settings, ignoredLogins: parseLoginList(settings.ignoredLogins) },
 		);
 		// Profile names cost one GraphQL request, which needs a token.
 		if (settings.useDisplayNames && client.authenticated) {
@@ -63,6 +67,10 @@ const handlers = {
 		return {
 			ok: true,
 			participants,
+			// Lets the page warn when some commits could not be read.
+			commitCount: settings.includeCommitAuthors
+				? { checked: commits.length, total: pull.commits, incompleteReason }
+				: null,
 			authenticated: client.authenticated,
 			rateLimit: client.rateLimit,
 		};
@@ -78,6 +86,31 @@ const handlers = {
 		return { ok: true };
 	},
 };
+
+/**
+ * The pull request commits endpoint stops at 250 commits, so longer pull requests are read through
+ * the compare endpoint instead. It compares against the base branch as it is now, like GitHub does
+ * for the PR's own commit list: `pull.base.sha` can be older and would pull in unrelated base
+ * commits after "Update branch". A result with more commits than the PR has is not trusted. On
+ * failure the first 250 are used, and `incompleteReason` tells the page why.
+ */
+async function fetchAllCommits(client, repoPath, pull, firstCommits) {
+	const baseRef = pull.base.ref.split('/').map(encodeURIComponent).join('/');
+	try {
+		const commits = await client.paginate(
+			`${repoPath}/compare/${baseRef}...${pull.head.sha}`,
+			(page) => page.commits,
+		);
+		if (commits.length > firstCommits.length && commits.length <= pull.commits) return { commits };
+		console.warn(`Compare returned ${commits.length} commits for a pull request with ${pull.commits}.`);
+		return { commits: firstCommits };
+	} catch (error) {
+		console.warn('Could not list every commit of the pull request:', error);
+		// Fine-grained tokens need "Contents" read access for the compare endpoint.
+		const deniedAccess = error instanceof GitHubApiError && ['forbidden', 'not_found'].includes(error.code);
+		return { commits: firstCommits, incompleteReason: deniedAccess ? 'contents_access' : 'error' };
+	}
+}
 
 /** Looks up GitHub profile names; failures are ignored because logins work as names too. */
 async function fetchDisplayNames(client, participants) {
