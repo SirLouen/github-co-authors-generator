@@ -106,6 +106,8 @@ its own budget, so the "API requests left" figure is the REST one.
 
 ## Privacy and permissions
 
+The extension has no server and collects nothing. The full policy is in [PRIVACY.md](PRIVACY.md).
+
 - The token is stored in `chrome.storage.local` in your browser profile. Storage access is restricted to the
   extension's own pages and service worker. The script running on github.com never sees the token. It asks
   the service worker to make the API calls.
