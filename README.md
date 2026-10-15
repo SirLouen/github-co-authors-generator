@@ -139,6 +139,16 @@ Run the unit tests (Node.js 20 or newer, no dependencies):
 npm test
 ```
 
+Build the Chrome Web Store ZIP (needs `zip`). It lands in `dist/` with `manifest.json` at the archive root:
+
+```sh
+npm run package
+```
+
+Publishing a GitHub release does the same in CI: `.github/workflows/release.yml` runs the tests, checks that the
+release tag (`v1.2.3` or `1.2.3`) matches the version in `extension/manifest.json`, and attaches the ZIP to the
+release. Bump the manifest version before tagging.
+
 After changing files, click the reload button on the extension's card in `chrome://extensions`, then reload
 the GitHub tab.
 
