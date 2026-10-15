@@ -141,8 +141,36 @@ Run the unit tests (Node.js 20 or newer, no dependencies):
 npm test
 ```
 
+Build the Chrome Web Store ZIP (needs `zip`). It lands in `dist/` with `manifest.json` at the archive root:
+
+```sh
+npm run package
+```
+
 After changing files, click the reload button on the extension's card in `chrome://extensions`, then reload
 the GitHub tab.
+
+## Releasing
+
+Releases come from the **Release** workflow (`.github/workflows/release.yml`). Open the repository's **Actions**
+tab, pick **Release**, click **Run workflow** on `main`, and enter the new version (such as `0.2.0`) and, if you
+like, a one-line summary. The workflow:
+
+1. checks the version is valid for Chrome, isn't lower than the current one, and has no tag yet;
+2. runs the tests;
+3. sets the version in `extension/manifest.json` and `package.json`, and adds an entry to
+   [`CHANGELOG.md`](CHANGELOG.md) listing the pull requests merged since the previous release;
+4. commits that to `main`, tags it `v<version>`, and publishes a GitHub release with the same notes and the
+   Chrome Web Store ZIP attached.
+
+Download the ZIP from the release page and upload it to the Chrome Web Store. For the first release, enter the
+version already in the manifest (`0.1.0`).
+
+If a run fails before it tags, fix the cause and run it again. If it fails after tagging but before the release
+page exists, create the release by hand from that tag on GitHub; the workflow then attaches the ZIP.
+
+If you create a release by hand on GitHub instead, the workflow still builds the ZIP and attaches it, as long as
+the tag matches the manifest version; it doesn't update the changelog in that case.
 
 ## Credits
 
