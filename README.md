@@ -166,6 +166,9 @@ like, a one-line summary. The workflow:
 Download the ZIP from the release page and upload it to the Chrome Web Store. For the first release, enter the
 version already in the manifest (`0.1.0`).
 
+If a run fails before it tags, fix the cause and run it again. If it fails after tagging but before the release
+page exists, create the release by hand from that tag on GitHub; the workflow then attaches the ZIP.
+
 If you create a release by hand on GitHub instead, the workflow still builds the ZIP and attaches it, as long as
 the tag matches the manifest version; it doesn't update the changelog in that case.
 

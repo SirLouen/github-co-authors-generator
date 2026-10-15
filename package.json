@@ -5,7 +5,7 @@
 	"description": "Chrome extension that adds an \"Add co-authors\" button to GitHub's merge box, using your own GitHub authentication.",
 	"type": "module",
 	"scripts": {
-		"test": "node --test \"test/**/*.test.js\"",
+		"test": "node --test",
 		"package": "scripts/package.sh"
 	},
 	"engines": {
