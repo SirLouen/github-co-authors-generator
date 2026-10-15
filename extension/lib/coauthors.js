@@ -25,6 +25,10 @@ const NON_HUMAN_LOGINS = new Set([
 ]);
 // Git identities used by GitHub Actions workflows and GitHub's own web commits.
 const AUTOMATION_EMAIL_PATTERN = /^(?:noreply|actions?|github-actions)@github\.com$/i;
+// Claude is credited only for work from Claude Code cloud sessions, whose commits Claude authors and
+// marks with a session link. Locally, Claude Code only adds itself as a co-author of your commits.
+const CLAUDE_EMAIL = 'noreply@anthropic.com';
+const CLAUDE_CLOUD_SESSION_PATTERN = /^Claude-Session:[ \t]*https:\/\/claude\.ai\/code\/session_/im;
 
 /**
  * @typedef {object} Participant
@@ -59,6 +63,16 @@ function isBotIdentity({ name = '', email = '' }) {
 	if (/\[bot\]$/i.test(name.trim()) || /\[bot\]@/i.test(email) || AUTOMATION_EMAIL_PATTERN.test(email)) return true;
 	const noreplyLogin = loginFromNoreplyEmail(email);
 	return noreplyLogin !== null && !isHumanUser({ login: noreplyLogin });
+}
+
+function isClaudeIdentity({ email = '' }) {
+	return email.toLowerCase() === CLAUDE_EMAIL;
+}
+
+/** Whether a commit was made in a Claude Code cloud session. */
+function isClaudeCloudCommit(gitCommit) {
+	const authoredByClaude = Boolean(gitCommit?.author) && isClaudeIdentity(gitCommit.author);
+	return authoredByClaude || CLAUDE_CLOUD_SESSION_PATTERN.test(gitCommit?.message ?? '');
 }
 
 /** Splits a list of logins typed by the user (one per line or comma-separated, "@" optional). */
@@ -174,7 +188,9 @@ export function collectParticipants(
 			} else if (gitAuthor) {
 				addGitIdentity(gitAuthor, 'commit');
 			}
+			const fromCloudSession = isClaudeCloudCommit(commit.commit);
 			for (const coAuthor of parseCoAuthorTrailers(commit.commit?.message ?? '')) {
+				if (isClaudeIdentity(coAuthor) && !fromCloudSession) continue;
 				addGitIdentity(coAuthor, 'commit');
 			}
 		}

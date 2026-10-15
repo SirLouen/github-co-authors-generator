@@ -84,8 +84,11 @@ Some rules always apply:
   automation, such as a workflow committing as `GitHub Action <action@github.com>`, even though GitHub links
   those emails to accounts that look like users. Unsubmitted (pending) reviews don't count.
 - Common services that use a regular account instead of a bot account are skipped too (Codecov's
-  `codecov-commenter`, `CLAassistant`, `ImgBotApp`, `k8s-ci-robot`, …). Add your own machine accounts, or AI
-  agents that commit under their own account such as `claude`, to **Never credit these accounts**.
+  `codecov-commenter`, `CLAassistant`, `ImgBotApp`, `k8s-ci-robot`, …). Add your own machine accounts to
+  **Never credit these accounts**.
+- Claude (`noreply@anthropic.com`) is credited only for work from Claude Code cloud sessions: commits that
+  Claude authored, or that carry a `Claude-Session: https://claude.ai/code/session_…` line. The
+  `Co-Authored-By: Claude` line that Claude Code adds to your own commits in local sessions is skipped.
 - People already listed as co-authors in the description are not added again. This includes the trailers
   GitHub pre-fills when you squash and merge. The email in *"This commit will be authored by …"* is never
   added either.

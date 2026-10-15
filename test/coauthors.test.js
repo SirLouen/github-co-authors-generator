@@ -160,6 +160,40 @@ describe('collectParticipants', () => {
 		);
 	});
 
+	it('credits Claude only for work from Claude Code cloud sessions', () => {
+		const claude = user('claude', 81847);
+		const session = 'Claude-Session: https://claude.ai/code/session_01VACPqDHYdxk7xfR4tsgSTQ';
+		const credited = (commits) =>
+			collectParticipants({ pull: { user: alice }, commits }, ALL_SOURCES).map((p) => p.email);
+
+		// Local Claude Code: you author the commit and Claude is only listed as a co-author.
+		assert.deepEqual(
+			credited([
+				commit(bob, 'Bob', 'bob@example.com', 'Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>'),
+			]),
+			['bob@example.com'],
+		);
+		// Cloud session: Claude authors the commit and links the session.
+		assert.deepEqual(
+			credited([
+				commit(
+					claude,
+					'Claude',
+					'noreply@anthropic.com',
+					`Fix\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n${session}`,
+				),
+			]),
+			['noreply@anthropic.com'],
+		);
+		// Cloud session committing under your own git identity: the session link is enough.
+		assert.deepEqual(
+			credited([
+				commit(bob, 'Bob', 'bob@example.com', `Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n${session}`),
+			]),
+			['bob@example.com', 'noreply@anthropic.com'],
+		);
+	});
+
 	it('ignores unsubmitted (pending) reviews', () => {
 		const participants = collectParticipants(
 			{ pull: { user: alice }, reviews: [{ user: bob, state: 'PENDING' }, { user: carol, state: 'COMMENTED' }] },
