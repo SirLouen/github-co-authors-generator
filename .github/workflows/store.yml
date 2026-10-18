@@ -1,0 +1,54 @@
+name: Publish to Chrome Web Store
+
+# Uploads the ZIP attached to an existing GitHub release to the Chrome Web Store and submits it for review.
+# The Release workflow calls this after publishing a release. Run it by hand from the Actions tab to send a
+# release that is already out (such as one made before this existed) or to retry a failed upload.
+# Needs the store secret and variables described in README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose ZIP to upload, such as v0.1.1
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      skip_if_unset:
+        description: Skip quietly when the store settings are missing, so releases work before they are set
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: chrome-web-store
+      cancel-in-progress: false
+    steps:
+      # The upload script comes from the branch the run started on, not the tag, so older releases work too.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Upload to the Chrome Web Store and submit for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          CHROME_WEBSTORE_SERVICE_ACCOUNT: ${{ secrets.CHROME_WEBSTORE_SERVICE_ACCOUNT }}
+          CHROME_WEBSTORE_PUBLISHER_ID: ${{ vars.CHROME_WEBSTORE_PUBLISHER_ID }}
+          CHROME_WEBSTORE_EXTENSION_ID: ${{ vars.CHROME_WEBSTORE_EXTENSION_ID }}
+          # A hand-started run (which has no skip_if_unset input) fails when the settings are missing.
+          CHROME_WEBSTORE_REQUIRED: ${{ inputs.skip_if_unset != true }}
+        run: |
+          gh release download "$TAG" --pattern '*.zip' --dir "$RUNNER_TEMP/store"
+          node scripts/publish-store.mjs "$RUNNER_TEMP"/store/*.zip

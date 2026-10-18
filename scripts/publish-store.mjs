@@ -9,7 +9,7 @@
 //   CHROME_WEBSTORE_PUBLISHER_ID     the publisher ID from the Developer Dashboard
 //   CHROME_WEBSTORE_EXTENSION_ID     the extension's item ID
 // When any of them is empty, it prints why and exits without doing anything, so releases still work
-// before the store is set up.
+// before the store is set up. With CHROME_WEBSTORE_REQUIRED=true it fails instead.
 //
 // API docs: https://developer.chrome.com/docs/webstore/using-api
 
@@ -139,7 +139,11 @@ async function main(args, env) {
 	}
 	const missing = missingSettings(env);
 	if (missing.length > 0) {
-		console.log(`Skipping the Chrome Web Store upload: ${missing.join(', ')} not set. See README.md, "Publishing to the Chrome Web Store".`);
+		const message = `${missing.join(', ')} not set. See README.md, "Publishing to the Chrome Web Store".`;
+		if (env.CHROME_WEBSTORE_REQUIRED === 'true') {
+			throw new Error(`Cannot upload to the Chrome Web Store: ${message}`);
+		}
+		console.log(`Skipping the Chrome Web Store upload: ${message}`);
 		return;
 	}
 	const key = parseServiceAccount(env.CHROME_WEBSTORE_SERVICE_ACCOUNT);

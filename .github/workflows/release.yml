@@ -144,28 +144,12 @@ jobs:
   store:
     needs: release
     if: github.event_name == 'workflow_dispatch' && inputs.store
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.release.outputs.tag }}
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-
-      - name: Upload to the Chrome Web Store and submit for review
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release.outputs.tag }}
-          CHROME_WEBSTORE_SERVICE_ACCOUNT: ${{ secrets.CHROME_WEBSTORE_SERVICE_ACCOUNT }}
-          CHROME_WEBSTORE_PUBLISHER_ID: ${{ vars.CHROME_WEBSTORE_PUBLISHER_ID }}
-          CHROME_WEBSTORE_EXTENSION_ID: ${{ vars.CHROME_WEBSTORE_EXTENSION_ID }}
-        run: |
-          gh release download "$TAG" --pattern '*.zip' --dir "$RUNNER_TEMP/store"
-          node scripts/publish-store.mjs "$RUNNER_TEMP"/store/*.zip
+    uses: ./.github/workflows/store.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit
 
   # Releases created by hand on GitHub. Releases published by the job above don't trigger this,
   # because events caused by the workflow's own token don't start new runs.

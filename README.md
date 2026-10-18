@@ -200,8 +200,15 @@ One-time setup:
    - add the variables `CHROME_WEBSTORE_PUBLISHER_ID` and `CHROME_WEBSTORE_EXTENSION_ID`.
    Then delete the downloaded key file.
 
-If the store step fails (for example because an earlier version is still in review), the GitHub release is
-already published. Fix the cause and use **Re-run failed jobs** on the run, or upload the ZIP by hand.
+To send a release that is already out (one made before the settings existed, or after a failed upload), run
+the **Publish to Chrome Web Store** workflow from the Actions tab on `main` with the release's tag, such as
+`v0.1.1`. It uploads the ZIP attached to that release and submits it for review. Unlike the step inside
+Release, it fails if the settings are missing.
+
+The store accepts one pending submission at a time and only versions higher than the last upload. If an
+earlier version is still in review, cancel that review in the Developer Dashboard first, or wait for it.
+If the store step fails, the GitHub release is already published: fix the cause and use **Re-run failed jobs**
+on the run, or run **Publish to Chrome Web Store** with the tag.
 
 ## Credits
 
