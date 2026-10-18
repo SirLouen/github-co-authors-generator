@@ -3,6 +3,8 @@ name: Release
 # Run "Release" from the Actions tab with the new version. It bumps the version, adds a CHANGELOG.md
 # entry, tags v<version>, publishes a GitHub release and attaches the Chrome Web Store ZIP.
 # A release created by hand on GitHub also gets the ZIP attached, as long as its tag matches the manifest.
+# Once the Chrome Web Store secret and variables are set (see README.md), the "store" job also uploads the
+# ZIP to the store and submits it for review. Without them it skips, and nothing reaches the store.
 
 on:
   workflow_dispatch:
@@ -15,6 +17,11 @@ on:
         description: Optional summary shown above the list of merged pull requests
         required: false
         type: string
+      store:
+        description: Upload to the Chrome Web Store and submit for review (only once the store settings are set)
+        required: false
+        type: boolean
+        default: true
   release:
     types: [published]
 
@@ -25,6 +32,8 @@ jobs:
   release:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     concurrency:
       group: release
       cancel-in-progress: false
@@ -129,6 +138,34 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
           ZIP: ${{ steps.build.outputs.zip }}
         run: gh release create "$TAG" "$ZIP" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+
+  # A separate job so that a store failure leaves the GitHub release in place, and "Re-run failed jobs"
+  # retries only the upload. It takes the ZIP from the release page, the same file you would upload by hand.
+  store:
+    needs: release
+    if: github.event_name == 'workflow_dispatch' && inputs.store
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Upload to the Chrome Web Store and submit for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+          CHROME_WEBSTORE_SERVICE_ACCOUNT: ${{ secrets.CHROME_WEBSTORE_SERVICE_ACCOUNT }}
+          CHROME_WEBSTORE_PUBLISHER_ID: ${{ vars.CHROME_WEBSTORE_PUBLISHER_ID }}
+          CHROME_WEBSTORE_EXTENSION_ID: ${{ vars.CHROME_WEBSTORE_EXTENSION_ID }}
+        run: |
+          gh release download "$TAG" --pattern '*.zip' --dir "$RUNNER_TEMP/store"
+          node scripts/publish-store.mjs "$RUNNER_TEMP"/store/*.zip
 
   # Releases created by hand on GitHub. Releases published by the job above don't trigger this,
   # because events caused by the workflow's own token don't start new runs.
