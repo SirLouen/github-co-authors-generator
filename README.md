@@ -169,14 +169,39 @@ like, a one-line summary. The workflow:
 4. commits that to `main`, tags it `v<version>`, and publishes a GitHub release with the same notes and the
    Chrome Web Store ZIP attached.
 
-Download the ZIP from the release page and upload it to the Chrome Web Store. For the first release, enter the
-version already in the manifest (`0.1.0`).
+Download the ZIP from the release page and upload it to the Chrome Web Store, or let the workflow do it (see
+below). For the first release, enter the version already in the manifest (`0.1.0`).
 
 If a run fails before it tags, fix the cause and run it again. If it fails after tagging but before the release
 page exists, create the release by hand from that tag on GitHub; the workflow then attaches the ZIP.
 
 If you create a release by hand on GitHub instead, the workflow still builds the ZIP and attaches it, as long as
 the tag matches the manifest version; it doesn't update the changelog in that case.
+
+### Publishing to the Chrome Web Store
+
+Once the settings below exist, the Release workflow's **store** job takes the ZIP from the new release page,
+uploads it to the Chrome Web Store with the [Chrome Web Store API](https://developer.chrome.com/docs/webstore/using-api)
+(v2) and submits it for review. The update goes live when the review passes, as with a manual upload. Untick
+**Upload to the Chrome Web Store** when running the workflow to skip it for one release. Until the settings exist
+the job only logs that it skipped.
+
+One-time setup:
+
+1. In [Google Cloud](https://console.cloud.google.com/), create a project (or reuse one) and enable the
+   **Chrome Web Store API** under *APIs & Services → Library*.
+2. Under *IAM & Admin → Service accounts*, create a service account (no roles needed), open it, and under
+   *Keys → Add key → Create new key* download a JSON key.
+3. In the [Developer Dashboard](https://chrome.google.com/webstore/devconsole), open *Account* and add the
+   service account's email address (the `client_email` in the key) as an API service account. Note your
+   **publisher ID** there, and the extension's **item ID** from its page in the dashboard.
+4. In this repository's *Settings → Secrets and variables → Actions*:
+   - add the secret `CHROME_WEBSTORE_SERVICE_ACCOUNT` with the whole JSON key file as its value;
+   - add the variables `CHROME_WEBSTORE_PUBLISHER_ID` and `CHROME_WEBSTORE_EXTENSION_ID`.
+   Then delete the downloaded key file.
+
+If the store step fails (for example because an earlier version is still in review), the GitHub release is
+already published. Fix the cause and use **Re-run failed jobs** on the run, or upload the ZIP by hand.
 
 ## Credits
 
