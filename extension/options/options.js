@@ -1,4 +1,5 @@
 import { pollForAccessToken, requestDeviceCode } from '../lib/device-flow.js';
+import { withGitHubClient } from '../lib/auth.js';
 import { createGitHubClient, GitHubApiError } from '../lib/github.js';
 import { clearAuth, getAuth, getSettings, saveSettings, setAuth } from '../lib/settings.js';
 
@@ -68,8 +69,7 @@ async function renderAccount() {
 
 async function renderRateLimit(auth) {
 	try {
-		const client = createGitHubClient({ token: auth?.token });
-		const { resources } = await client.request('/rate_limit');
+		const { resources } = await withGitHubClient((client) => client.request('/rate_limit'));
 		const { limit, remaining, reset } = resources.core;
 		const resetTime = new Date(reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 		elements.rateLimit.textContent =
@@ -132,14 +132,19 @@ async function startDeviceFlow() {
 		elements.devicePanel.hidden = false;
 		elements.deviceOpen.focus();
 
-		const { accessToken } = await pollForAccessToken({
+		const tokens = await pollForAccessToken({
 			clientId,
 			deviceCode: code.deviceCode,
 			interval: code.interval,
 			expiresIn: code.expiresIn,
 			signal: controller.signal,
 		});
-		await saveToken(accessToken, 'device');
+		await saveToken(tokens.accessToken, 'device', {
+			refreshToken: tokens.refreshToken,
+			expiresAt: tokens.expiresAt,
+			refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
+			clientId,
+		});
 	} catch (error) {
 		if (!controller.signal.aborted) showAccountMessage(error.message, 'error');
 	} finally {
@@ -194,8 +199,13 @@ async function savePersonalAccessToken(event) {
 	}
 }
 
-/** Checks the token against GitHub, then stores it. */
-async function saveToken(token, method) {
+/**
+ * Checks the token against GitHub, then stores it.
+ * @param {string} token
+ * @param {'device' | 'pat'} method
+ * @param {object} [refresh] For expiring device-flow tokens: what is needed to renew them.
+ */
+async function saveToken(token, method, refresh = {}) {
 	const user = await createGitHubClient({ token }).request('/user');
 	await setAuth({
 		token,
@@ -203,6 +213,7 @@ async function saveToken(token, method) {
 		login: user.login,
 		avatarUrl: user.avatar_url ?? null,
 		savedAt: Date.now(),
+		...refresh,
 	});
 	await renderAccount();
 	showAccountMessage(`Signed in as @${user.login}. The “Add co-authors” button now uses your account.`, 'success');

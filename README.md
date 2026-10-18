@@ -38,6 +38,10 @@ GitHub's device flow needs the client ID of an OAuth App. You create it once, an
    `DEFAULT_OAUTH_CLIENT_ID` in [`extension/config.js`](extension/config.js) so every install of your copy has it.
 5. Click **Sign in with GitHub**, then **Copy code and open GitHub**, paste the code, and approve.
 
+OAuth Apps created since August 2026 issue access tokens that expire after eight hours, with a refresh token
+that lasts six months. The extension renews the token on its own shortly before it expires, so you stay signed
+in. You only sign in again if the extension goes unused for six months or you revoke it on GitHub.
+
 By default the token has no scopes, which gives read-only access to public data. That is enough for public
 repositories. To use the button on private repositories, tick **Also request access to private
 repositories** before signing in. GitHub only offers the broad `repo` scope for that. Option B is the
@@ -111,7 +115,8 @@ The extension has no server and collects nothing. The full policy is in [PRIVACY
 - The token is stored in `chrome.storage.local` in your browser profile. Storage access is restricted to the
   extension's own pages and service worker. The script running on github.com never sees the token. It asks
   the service worker to make the API calls.
-- The token is only sent to `api.github.com`. During sign-in, the extension also contacts `github.com/login/*`.
+- The token is only sent to `api.github.com`. During sign-in, and to renew an expiring sign-in, the extension
+  also contacts `github.com/login/*`. The refresh token is stored next to the access token and only sent there.
 - Permissions: `storage` for settings, plus host access to `api.github.com` and `github.com/login/*`. The
   content script runs on `github.com` pages to add the button.
 - **Sign out** removes the token from the browser. To revoke it on GitHub as well, go to
@@ -128,6 +133,7 @@ extension/
 ├── content/content.js   Adds the button to the merge box
 ├── options/             Settings page (sign-in, preferences)
 ├── lib/
+│   ├── auth.js          Renews expiring sign-in tokens before and after GitHub rejects them
 │   ├── coauthors.js     Collects participants and writes the trailers (pure functions)
 │   ├── device-flow.js   GitHub OAuth device flow
 │   ├── github.js        REST/GraphQL client with pagination and rate-limit errors

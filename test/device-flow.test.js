@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { DeviceFlowError, pollForAccessToken, requestDeviceCode } from '../extension/lib/device-flow.js';
+import {
+	DeviceFlowError,
+	pollForAccessToken,
+	refreshAccessToken,
+	requestDeviceCode,
+} from '../extension/lib/device-flow.js';
 
 /** A fetch stub returning queued JSON responses in order. */
 function queuedFetch(responses) {
@@ -85,12 +90,41 @@ describe('pollForAccessToken', () => {
 			fetchImpl,
 			...clock,
 		});
-		assert.deepEqual(result, { accessToken: 'gho_token', scope: '' });
+		assert.deepEqual(result, {
+			accessToken: 'gho_token',
+			scope: '',
+			refreshToken: null,
+			expiresAt: null,
+			refreshTokenExpiresAt: null,
+		});
 		assert.deepEqual(clock.sleeps, [5000, 5000, 10000, 10000]);
 		assert.deepEqual(calls[0].body, {
 			client_id: 'cid',
 			device_code: 'dev',
 			grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+		});
+	});
+
+	it('returns the refresh token and expiry times of an expiring token', async () => {
+		const clock = fakeClock();
+		const { fetchImpl } = queuedFetch([
+			{
+				body: {
+					access_token: 'ghu_token',
+					scope: '',
+					expires_in: 28800,
+					refresh_token: 'ghr_refresh',
+					refresh_token_expires_in: 15897600,
+				},
+			},
+		]);
+		const result = await pollForAccessToken({ clientId: 'c', deviceCode: 'd', interval: 5, expiresIn: 900, fetchImpl, ...clock });
+		assert.deepEqual(result, {
+			accessToken: 'ghu_token',
+			scope: '',
+			refreshToken: 'ghr_refresh',
+			expiresAt: 5000 + 28_800_000,
+			refreshTokenExpiresAt: 5000 + 15_897_600_000,
 		});
 	});
 
@@ -127,5 +161,31 @@ describe('pollForAccessToken', () => {
 			}),
 			{ name: 'AbortError' },
 		);
+	});
+});
+
+describe('refreshAccessToken', () => {
+	it('swaps the refresh token for a new pair without a client secret', async () => {
+		const { fetchImpl, calls } = queuedFetch([
+			{ body: { access_token: 'ghu_new', expires_in: 28800, refresh_token: 'ghr_new', refresh_token_expires_in: 100 } },
+		]);
+		const result = await refreshAccessToken({ clientId: 'Ov23li', refreshToken: 'ghr_old', fetchImpl, now: () => 1000 });
+		assert.deepEqual(calls[0].body, { client_id: 'Ov23li', grant_type: 'refresh_token', refresh_token: 'ghr_old' });
+		assert.equal(calls[0].url, 'https://github.com/login/oauth/access_token');
+		assert.deepEqual(result, {
+			accessToken: 'ghu_new',
+			scope: '',
+			refreshToken: 'ghr_new',
+			expiresAt: 1000 + 28_800_000,
+			refreshTokenExpiresAt: 1000 + 100_000,
+		});
+	});
+
+	it('reports a refresh token GitHub no longer accepts', async () => {
+		const { fetchImpl } = queuedFetch([{ body: { error: 'bad_refresh_token' } }]);
+		await assert.rejects(refreshAccessToken({ clientId: 'c', refreshToken: 'r', fetchImpl }), {
+			code: 'bad_refresh_token',
+			message: /sign in again/,
+		});
 	});
 });
