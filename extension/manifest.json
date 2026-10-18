@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "GitHub Co-Authors Generator",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Adds an \"Add co-authors\" button to the GitHub merge box that credits PR participants, using your own GitHub authentication.",
 	"minimum_chrome_version": "140",
 	"icons": {

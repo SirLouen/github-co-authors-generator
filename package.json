@@ -1,6 +1,6 @@
 {
 	"name": "github-co-authors-generator",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"private": true,
 	"description": "Chrome extension that adds an \"Add co-authors\" button to GitHub's merge box, using your own GitHub authentication.",
 	"type": "module",
