@@ -22,6 +22,7 @@ const ERROR_MESSAGES = {
 	incorrect_client_credentials: 'GitHub does not recognize this OAuth App client ID.',
 	unauthorized_client: 'GitHub does not recognize this OAuth App client ID.',
 	incorrect_device_code: 'GitHub rejected the device code. Start again.',
+	bad_refresh_token: 'Your GitHub sign-in has expired. Sign out and sign in again.',
 };
 
 async function postForm(fetchImpl, url, params, signal) {
@@ -96,6 +97,28 @@ const defaultSleep = (ms, signal) =>
 	});
 
 /**
+ * @typedef {object} TokenSet
+ * @property {string} accessToken
+ * @property {string} scope
+ * @property {string | null} refreshToken Only sent when the OAuth App issues expiring tokens.
+ * @property {number | null} expiresAt When the access token expires (ms since epoch), or null if it does not.
+ * @property {number | null} refreshTokenExpiresAt When the refresh token expires (ms since epoch).
+ */
+
+/** Expiring tokens come with a refresh token and lifetimes in seconds; long-lived ones with neither. */
+function toTokenSet(data, now) {
+	const expiresIn = Number(data.expires_in);
+	const refreshExpiresIn = Number(data.refresh_token_expires_in);
+	return {
+		accessToken: data.access_token,
+		scope: data.scope ?? '',
+		refreshToken: data.refresh_token || null,
+		expiresAt: expiresIn > 0 ? now() + expiresIn * 1000 : null,
+		refreshTokenExpiresAt: refreshExpiresIn > 0 ? now() + refreshExpiresIn * 1000 : null,
+	};
+}
+
+/**
  * Polls until the user approves (or rejects) the device code on GitHub.
  * @param {object} options
  * @param {string} options.clientId
@@ -106,7 +129,7 @@ const defaultSleep = (ms, signal) =>
  * @param {(ms: number, signal?: AbortSignal) => Promise<void>} [options.sleep]
  * @param {() => number} [options.now]
  * @param {AbortSignal} [options.signal]
- * @returns {Promise<{ accessToken: string, scope: string }>}
+ * @returns {Promise<TokenSet>}
  */
 export async function pollForAccessToken({
 	clientId,
@@ -129,7 +152,7 @@ export async function pollForAccessToken({
 				{ client_id: clientId, device_code: deviceCode, grant_type: DEVICE_GRANT_TYPE },
 				signal,
 			);
-			if (data.access_token) return { accessToken: data.access_token, scope: data.scope ?? '' };
+			if (data.access_token) return toTokenSet(data, now);
 		} catch (error) {
 			if (!(error instanceof DeviceFlowError)) throw error;
 			if (error.code === 'authorization_pending') continue;
@@ -141,4 +164,25 @@ export async function pollForAccessToken({
 		}
 	}
 	throw new DeviceFlowError(ERROR_MESSAGES.expired_token, 'expired_token');
+}
+
+/**
+ * Swaps a refresh token for a new access token and refresh token. OAuth Apps created since August 2026
+ * issue access tokens that expire after eight hours. Tokens from the device flow refresh without the
+ * client secret. The old refresh token stops working once used.
+ * @param {object} options
+ * @param {string} options.clientId The client ID the token was issued to.
+ * @param {string} options.refreshToken
+ * @param {typeof fetch} [options.fetchImpl]
+ * @param {() => number} [options.now]
+ * @returns {Promise<TokenSet>}
+ */
+export async function refreshAccessToken({ clientId, refreshToken, fetchImpl = (...args) => fetch(...args), now = Date.now }) {
+	const data = await postForm(fetchImpl, ACCESS_TOKEN_URL, {
+		client_id: clientId,
+		grant_type: 'refresh_token',
+		refresh_token: refreshToken,
+	});
+	if (!data.access_token) throw new DeviceFlowError('GitHub did not return a new token.', 'http');
+	return toTokenSet(data, now);
 }

@@ -34,6 +34,10 @@ export async function saveSettings(patch) {
  * @property {string} login GitHub login the token belongs to.
  * @property {string | null} avatarUrl
  * @property {number} savedAt
+ * @property {string | null} [refreshToken] Set when GitHub issued an expiring token (device flow only).
+ * @property {number | null} [expiresAt] When `token` expires (ms since epoch); absent for long-lived tokens.
+ * @property {number | null} [refreshTokenExpiresAt]
+ * @property {string} [clientId] OAuth App the token was issued to, needed to refresh it.
  */
 
 /** @returns {Promise<StoredAuth | null>} */

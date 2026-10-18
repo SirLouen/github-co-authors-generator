@@ -1,8 +1,9 @@
 // Service worker: makes the GitHub API calls with the saved token, so the token never reaches github.com.
 
 import { addCoAuthorsToMessage, applyDisplayNames, collectParticipants, parseLoginList } from './lib/coauthors.js';
-import { createGitHubClient, GitHubApiError } from './lib/github.js';
-import { getAuth, getSettings } from './lib/settings.js';
+import { withGitHubClient } from './lib/auth.js';
+import { GitHubApiError } from './lib/github.js';
+import { getSettings } from './lib/settings.js';
 
 const DISPLAY_NAME_BATCH_SIZE = 50;
 
@@ -37,43 +38,9 @@ const handlers = {
 		if (!isValidSegment(owner) || !isValidSegment(repo) || !Number.isInteger(number)) {
 			throw new Error('Not a pull request page.');
 		}
-		const [auth, settings] = await Promise.all([getAuth(), getSettings()]);
-		const client = createGitHubClient({ token: auth?.token });
-		const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-		const pullPath = `${repoPath}/pulls/${number}`;
-		const none = Promise.resolve([]);
-
-		const [pull, firstCommits, reviews, reviewComments, issueComments] = await Promise.all([
-			client.request(pullPath),
-			settings.includeCommitAuthors ? client.paginate(`${pullPath}/commits`) : none,
-			settings.includeReviewers ? client.paginate(`${pullPath}/reviews`) : none,
-			settings.includeReviewers ? client.paginate(`${pullPath}/comments`) : none,
-			settings.includeCommenters ? client.paginate(`${repoPath}/issues/${number}/comments`) : none,
-		]);
-		const { commits, incompleteReason } =
-			settings.includeCommitAuthors && pull.commits > firstCommits.length
-				? await fetchAllCommits(client, repoPath, pull, firstCommits)
-				: { commits: firstCommits };
-
-		let participants = collectParticipants(
-			{ pull, commits, reviews, reviewComments, issueComments },
-			{ ...settings, ignoredLogins: parseLoginList(settings.ignoredLogins) },
-		);
-		// Profile names cost one GraphQL request, which needs a token.
-		if (settings.useDisplayNames && client.authenticated) {
-			participants = applyDisplayNames(participants, await fetchDisplayNames(client, participants));
-		}
-
-		return {
-			ok: true,
-			participants,
-			// Lets the page warn when some commits could not be read.
-			commitCount: settings.includeCommitAuthors
-				? { checked: commits.length, total: pull.commits, incompleteReason }
-				: null,
-			authenticated: client.authenticated,
-			rateLimit: client.rateLimit,
-		};
+		const settings = await getSettings();
+		// Retried once with a refreshed token if GitHub rejects an expired one.
+		return withGitHubClient((client) => fetchParticipants(client, settings, { owner, repo, number }));
 	},
 
 	/** Appends trailers for participants who are not credited in the message yet. */
@@ -86,6 +53,45 @@ const handlers = {
 		return { ok: true };
 	},
 };
+
+/** Loads the participants of a pull request. */
+async function fetchParticipants(client, settings, { owner, repo, number }) {
+	const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+	const pullPath = `${repoPath}/pulls/${number}`;
+	const none = Promise.resolve([]);
+
+	const [pull, firstCommits, reviews, reviewComments, issueComments] = await Promise.all([
+		client.request(pullPath),
+		settings.includeCommitAuthors ? client.paginate(`${pullPath}/commits`) : none,
+		settings.includeReviewers ? client.paginate(`${pullPath}/reviews`) : none,
+		settings.includeReviewers ? client.paginate(`${pullPath}/comments`) : none,
+		settings.includeCommenters ? client.paginate(`${repoPath}/issues/${number}/comments`) : none,
+	]);
+	const { commits, incompleteReason } =
+		settings.includeCommitAuthors && pull.commits > firstCommits.length
+			? await fetchAllCommits(client, repoPath, pull, firstCommits)
+			: { commits: firstCommits };
+
+	let participants = collectParticipants(
+		{ pull, commits, reviews, reviewComments, issueComments },
+		{ ...settings, ignoredLogins: parseLoginList(settings.ignoredLogins) },
+	);
+	// Profile names cost one GraphQL request, which needs a token.
+	if (settings.useDisplayNames && client.authenticated) {
+		participants = applyDisplayNames(participants, await fetchDisplayNames(client, participants));
+	}
+
+	return {
+		ok: true,
+		participants,
+		// Lets the page warn when some commits could not be read.
+		commitCount: settings.includeCommitAuthors
+			? { checked: commits.length, total: pull.commits, incompleteReason }
+			: null,
+		authenticated: client.authenticated,
+		rateLimit: client.rateLimit,
+	};
+}
 
 /**
  * The pull request commits endpoint stops at 250 commits, so longer pull requests are read through
